@@ -1,0 +1,21 @@
+# Trafy Community
+
+> Trafy Community is a community-driven learning and hiring platform. Members
+> build skills through creator- and institution-authored courses (video, text,
+> and live sessions), prove those skills with timed assessments, collaborate
+> in study groups and realtime chat, and connect directly with employers
+> hiring on the platform through a Kanban-style application pipeline and
+> milestone-based contracts.
+
+## Key pages
+
+- [Course catalog](/learn): browse and enroll in published courses, free or paid, self-paced or in a scheduled cohort.
+- [Job listings](/jobs): open roles posted directly by employers on the platform.
+- [Institutions](/institutions): organizations (schools, bootcamps, companies) publishing courses under their own name.
+- [Sign up](/sign-up): create an account via email one-time-code, no password.
+
+## Notes for AI agents and crawlers
+
+- Course pages include `Course` and `AggregateRating` structured data (JSON-LD) reflecting real learner reviews.
+- Most of the product (feed, chat, notifications, contracts) is behind authentication and intentionally excluded from indexing — see `/robots.txt`.
+- This file and the site's SEO metadata are maintained alongside the codebase at each release; treat page content as the source of truth over any cached summary.
