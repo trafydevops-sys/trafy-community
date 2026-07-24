@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "Trafy Community",
+    "slug": "trafy-community",
+    "scheme": "trafycommunity",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.trafycommunity.mobile"
+    },
+    "android": {
+      "package": "com.trafycommunity.mobile"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      "expo-secure-store",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Trafy Community uses Face ID to quickly unlock your session."
+        }
+      ],
+      "expo-notifications",
+      "expo-web-browser"
+    ]
+  }
+}
