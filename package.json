@@ -1,0 +1,28 @@
+{
+  "name": "trafy-community",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Trafy Community — community-based learning & hiring platform. Milestone 1: Identity.",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w apps/api & npm run dev -w apps/web",
+    "dev:api": "npm run dev -w apps/api",
+    "dev:web": "npm run dev -w apps/web",
+    "dev:mobile": "npm run start -w apps/mobile",
+    "build": "npm run build -w packages/core && npm run build -w packages/db && npm run build -w apps/api && npm run build -w apps/web",
+    "typecheck": "npm run typecheck -w packages/core && npm run typecheck -w packages/db && npm run typecheck -w apps/api && npm run typecheck -w apps/web && npm run typecheck -w apps/mobile",
+    "db:generate": "npm run db:generate -w packages/db",
+    "db:migrate": "npm run db:migrate -w packages/db",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}
