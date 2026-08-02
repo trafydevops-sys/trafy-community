@@ -39,6 +39,24 @@ export function initRealtime(httpServer: HttpServer): Server {
       const event: SocketTypingEvent = { channelId: payload.channelId, userId, typing: payload.typing };
       socket.to(`channel:${payload.channelId}`).emit("typing", event);
     });
+
+    // Assessment runner: candidate joins their own session's room to
+    // receive live grading updates (session:answer-graded, session:graded).
+    socket.on("session:join", (sessionId: string) => {
+      socket.join(`session:${sessionId}`);
+    });
+    socket.on("session:leave", (sessionId: string) => {
+      socket.leave(`session:${sessionId}`);
+    });
+
+    // Recruiter/proctor view: joins to receive integrity:flag events for a
+    // specific assessment while candidates are actively taking it.
+    socket.on("assessment:live:join", (assessmentId: string) => {
+      socket.join(`assessment:${assessmentId}:live`);
+    });
+    socket.on("assessment:live:leave", (assessmentId: string) => {
+      socket.leave(`assessment:${assessmentId}:live`);
+    });
   });
 
   return io;
@@ -50,4 +68,22 @@ export function emitNewMessage(event: SocketMessageEvent): void {
 
 export function emitNotification(userId: string, notification: Notification): void {
   io?.to(`user:${userId}`).emit("notification:new", notification);
+}
+
+export function emitSessionAnswerGraded(
+  sessionId: string,
+  payload: { questionId: string; scoreFraction: number },
+): void {
+  io?.to(`session:${sessionId}`).emit("session:answer-graded", payload);
+}
+
+export function emitSessionGraded(sessionId: string, payload: { rawScore: number; percentile: number }): void {
+  io?.to(`session:${sessionId}`).emit("session:graded", payload);
+}
+
+export function emitIntegrityFlag(
+  assessmentId: string,
+  payload: { sessionId: string; userId: string; event: string; count: number },
+): void {
+  io?.to(`assessment:${assessmentId}:live`).emit("integrity:flag", payload);
 }
