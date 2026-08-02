@@ -57,6 +57,20 @@
       "when": 1783914139187,
       "tag": "0007_yielding_vin_gonzales",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785697801700,
+      "tag": "0008_drop_legacy_assessment_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785697860996,
+      "tag": "0009_create_assessment_foundation_tables",
+      "breakpoints": true
     }
   ]
 }

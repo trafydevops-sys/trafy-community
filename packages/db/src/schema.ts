@@ -11,6 +11,7 @@ import {
   timestamp,
   unique,
   uuid,
+  varchar,
 } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
@@ -391,46 +392,50 @@ export const studyGroups = pgTable(
   (table) => [index("study_groups_owner_idx").on(table.ownerId)]
 );
 
+export const questionBank = pgTable(
+  "question_bank",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    externalId: varchar("external_id", { length: 120 }).unique(),
+    track: text("track").notNull(), // Track from @trafy-community/core
+    skillTags: jsonb("skill_tags").notNull().default([]), // string[]
+    kind: text("kind").notNull(), // QuestionKind
+    difficulty: integer("difficulty").notNull().default(1), // 1-5
+    prompt: text("prompt").notNull(),
+    payload: jsonb("payload").notNull(), // kind-specific, see @trafy-community/core; answer key stripped before serving
+    active: boolean("active").notNull().default(true),
+    authorId: uuid("author_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("question_bank_track_idx").on(table.track), index("question_bank_author_idx").on(table.authorId)]
+);
+
+// A persisted, reusable *definition* — specific question ids snapshotted from
+// question_bank at assembly time, so later bank edits never change a test
+// someone already took.
 export const assessments = pgTable(
   "assessments",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    title: text("title").notNull(),
+    track: text("track").notNull(),
+    layer: integer("layer").notNull().default(1), // 1 | 2 — Layer 3/4 don't use this table
+    timeLimitSeconds: integer("time_limit_seconds"),
+    questionIds: jsonb("question_ids").notNull().default([]), // string[]
+    jobId: uuid("job_id").references(() => jobs.id, { onDelete: "set null" }), // set for Layer 2 (JD-based) tests
     authorId: uuid("author_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    title: text("title").notNull(),
-    description: text("description"),
-    timeLimitSeconds: integer("time_limit_seconds"),
-    passingScore: real("passing_score").notNull().default(0.6),
-    published: boolean("published").notNull().default(false),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [index("assessments_author_idx").on(table.authorId)]
-);
-
-export const assessmentQuestions = pgTable(
-  "assessment_questions",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    assessmentId: uuid("assessment_id")
-      .notNull()
-      .references(() => assessments.id, { onDelete: "cascade" }),
-    kind: text("kind").notNull(), // QuestionKind
-    prompt: text("prompt").notNull(),
-    points: integer("points").notNull().default(1),
-    options: jsonb("options").notNull().default([]), // choice kinds
-    answerKey: jsonb("answer_key").notNull().default({}), // stripped before serving
-    language: text("language"), // code only
-    starterCode: text("starter_code"), // code only
-    order: integer("order").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("assessment_questions_assessment_idx").on(table.assessmentId)]
+  (table) => [index("assessments_author_idx").on(table.authorId), index("assessments_job_idx").on(table.jobId)]
 );
 
-export const assessmentAttempts = pgTable(
-  "assessment_attempts",
+export const assessmentSessions = pgTable(
+  "assessment_sessions",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     assessmentId: uuid("assessment_id")
@@ -439,29 +444,61 @@ export const assessmentAttempts = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("active"), // 'active' | 'submitted' | 'graded' | 'expired'
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
-    rawScore: real("raw_score"),
-    maxScore: real("max_score"),
-    passed: boolean("passed"),
+    telemetry: jsonb("telemetry").notNull().default({}), // { blur, paste, "fullscreen-exit": number }
   },
-  (table) => [index("assessment_attempts_user_idx").on(table.userId)]
+  (table) => [
+    index("assessment_sessions_user_idx").on(table.userId),
+    index("assessment_sessions_assessment_idx").on(table.assessmentId),
+  ]
 );
 
-export const attemptAnswers = pgTable(
-  "attempt_answers",
+export const answers = pgTable(
+  "answers",
   {
-    attemptId: uuid("attempt_id")
+    id: uuid("id").primaryKey().defaultRandom(),
+    sessionId: uuid("session_id")
       .notNull()
-      .references(() => assessmentAttempts.id, { onDelete: "cascade" }),
+      .references(() => assessmentSessions.id, { onDelete: "cascade" }),
     questionId: uuid("question_id")
       .notNull()
-      .references(() => assessmentQuestions.id, { onDelete: "cascade" }),
+      .references(() => questionBank.id),
     response: jsonb("response").notNull().default({}),
-    scoreFraction: real("score_fraction").notNull().default(0),
-    gradedAt: timestamp("graded_at", { withTimezone: true }).notNull().defaultNow(),
+    correct: boolean("correct"),
+    scoreFraction: real("score_fraction"), // 0-1, null until graded
+    gradedAt: timestamp("graded_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [primaryKey({ columns: [table.attemptId, table.questionId] })]
+  (table) => [
+    unique("answers_session_question_unique").on(table.sessionId, table.questionId),
+    index("answers_session_idx").on(table.sessionId),
+  ]
+);
+
+// One row per graded session — the source of truth for Trafy Points.
+export const trackResults = pgTable(
+  "track_results",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => assessmentSessions.id, { onDelete: "cascade" }),
+    track: text("track").notNull(),
+    rawScore: real("raw_score").notNull(), // 0-1
+    percentile: real("percentile").notNull(), // 0-100 vs cohort at grading time
+    earnedAt: timestamp("earned_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("track_results_session_unique").on(table.sessionId),
+    index("track_results_user_idx").on(table.userId),
+    index("track_results_track_idx").on(table.track),
+  ]
 );
 
 // ---------------------------------------------------------------------------
