@@ -1,347 +1,363 @@
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, ilike, isNotNull, or } from "drizzle-orm";
-import { z } from "zod";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { schema } from "@trafy-community/db";
 import {
-  addQuestionInput,
+  buildSessionPlan,
+  computeRawScore,
   createAssessmentInput,
-  setAssessmentPublishedInput,
-  startAttemptInput,
-  submitAttemptInput,
-  updateAssessmentInput,
-  type AnswerResponse,
-  type AssessmentForEdit,
+  createBankQuestionInput,
+  getNextQuestionInput,
+  gradeSyncAnswer,
+  isAsyncGraded,
+  listBankQuestionsInput,
+  percentileOf,
+  recordTelemetryInput,
+  startSessionInput,
+  submitAnswerInput,
+  submitSessionInput,
+  toSafePayload,
+  updateBankQuestionInput,
   type AssessmentSummary,
-  type Attempt,
-  type AttemptResult,
-  type AuthorQuestion,
-  type GradedAnswer,
+  type BankQuestion,
+  type NextQuestionResult,
   type QuestionKind,
-  type RunnerQuestion,
+  type StartSessionResult,
+  type SubmitSessionResult,
+  type TrackResultHistoryItem,
 } from "@trafy-community/core";
 import { router, protectedProcedure } from "../lib/trpc.js";
 import { db } from "../lib/db.js";
-import { gradeAnswer } from "../lib/grading.js";
+import { gradeCodeStub } from "../lib/grading.js";
+import { usingCodeGradingStub } from "../lib/env.js";
+import { getQueues, tryEnqueue } from "../lib/queue.js";
+import { emitIntegrityFlag, emitSessionAnswerGraded, emitSessionGraded } from "../lib/realtime.js";
+
+const SESSION_MINUTES = 45;
+const INTEGRITY_FLAG_THRESHOLD = 3; // flag on the 3rd+ tab-blur/paste
 
 async function authorName(userId: string): Promise<string> {
   const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, userId)).limit(1);
   return profile?.fullName || "";
 }
 
-async function questionCount(assessmentId: string): Promise<number> {
-  const rows = await db
-    .select({ id: schema.assessmentQuestions.id })
-    .from(schema.assessmentQuestions)
-    .where(eq(schema.assessmentQuestions.assessmentId, assessmentId));
-  return rows.length;
-}
-
-async function toSummary(row: typeof schema.assessments.$inferSelect): Promise<AssessmentSummary> {
+function toBankQuestion(row: typeof schema.questionBank.$inferSelect): BankQuestion {
   return {
     id: row.id,
-    title: row.title,
-    description: row.description ?? undefined,
-    timeLimitSeconds: row.timeLimitSeconds,
-    passingScore: row.passingScore,
-    published: row.published,
+    externalId: row.externalId,
+    track: row.track as BankQuestion["track"],
+    skillTags: row.skillTags as string[],
+    kind: row.kind as QuestionKind,
+    difficulty: row.difficulty,
+    prompt: row.prompt,
+    payload: row.payload,
+    active: row.active,
     authorId: row.authorId,
-    authorName: await authorName(row.authorId),
-    questionCount: await questionCount(row.id),
     createdAt: row.createdAt.toISOString(),
   };
 }
 
-function toRunnerQuestion(row: typeof schema.assessmentQuestions.$inferSelect): RunnerQuestion {
-  const kind = row.kind as QuestionKind;
-  const isChoice = kind === "single_choice" || kind === "multi_choice";
+async function toAssessmentSummary(row: typeof schema.assessments.$inferSelect): Promise<AssessmentSummary> {
   return {
     id: row.id,
-    kind,
-    prompt: row.prompt,
-    points: row.points,
-    order: row.order,
-    options: isChoice ? (row.options as string[]) : undefined,
-    language: kind === "code" ? (row.language ?? undefined) : undefined,
-    starterCode: kind === "code" ? (row.starterCode ?? undefined) : undefined,
+    title: row.title,
+    track: row.track as AssessmentSummary["track"],
+    layer: row.layer,
+    timeLimitSeconds: row.timeLimitSeconds,
+    questionCount: (row.questionIds as string[]).length,
+    jobId: row.jobId,
+    authorId: row.authorId,
+    authorName: await authorName(row.authorId),
+    createdAt: row.createdAt.toISOString(),
   };
 }
 
-async function assertAuthor(assessmentId: string, userId: string) {
-  const [row] = await db.select().from(schema.assessments).where(eq(schema.assessments.id, assessmentId)).limit(1);
-  if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-  if (row.authorId !== userId) throw new TRPCError({ code: "FORBIDDEN", message: "Not your assessment." });
-  return row;
+async function requireOwnActiveSession(sessionId: string, userId: string) {
+  const [session] = await db
+    .select()
+    .from(schema.assessmentSessions)
+    .where(eq(schema.assessmentSessions.id, sessionId))
+    .limit(1);
+  if (!session || session.userId !== userId) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Session not found." });
+  }
+  if (session.status !== "active") {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Session is not active." });
+  }
+  if (session.expiresAt <= new Date()) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Session expired." });
+  }
+  return session;
 }
 
 export const assessmentsRouter = router({
-  // --- authoring ---
+  bank: router({
+    create: protectedProcedure.input(createBankQuestionInput).mutation(async ({ ctx, input }) => {
+      const { kind, track, skillTags, difficulty, prompt, payload } = input;
+      const [row] = await db
+        .insert(schema.questionBank)
+        .values({ authorId: ctx.user.sub, kind, track, skillTags, difficulty, prompt, payload })
+        .returning();
+      if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      return toBankQuestion(row);
+    }),
+
+    update: protectedProcedure.input(updateBankQuestionInput).mutation(async ({ ctx, input }) => {
+      const { questionId, ...rest } = input;
+      const [existing] = await db.select().from(schema.questionBank).where(eq(schema.questionBank.id, questionId)).limit(1);
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
+      if (existing.authorId !== ctx.user.sub) throw new TRPCError({ code: "FORBIDDEN", message: "Not your question." });
+      const [row] = await db
+        .update(schema.questionBank)
+        .set({ ...rest, updatedAt: new Date() })
+        .where(eq(schema.questionBank.id, questionId))
+        .returning();
+      if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      return toBankQuestion(row);
+    }),
+
+    list: protectedProcedure.input(listBankQuestionsInput).query(async ({ input }) => {
+      const conditions = [eq(schema.questionBank.active, true)];
+      if (input.track) conditions.push(eq(schema.questionBank.track, input.track));
+      const rows = await db.select().from(schema.questionBank).where(and(...conditions));
+      const filtered = input.skillTag ? rows.filter((r) => (r.skillTags as string[]).includes(input.skillTag!)) : rows;
+      return filtered.map(toBankQuestion);
+    }),
+  }),
 
   create: protectedProcedure.input(createAssessmentInput).mutation(async ({ ctx, input }) => {
+    const questionRows = await db
+      .select({ id: schema.questionBank.id })
+      .from(schema.questionBank)
+      .where(inArray(schema.questionBank.id, input.questionIds));
+    if (questionRows.length !== input.questionIds.length) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "One or more question ids don't exist." });
+    }
     const [row] = await db
       .insert(schema.assessments)
       .values({
-        authorId: ctx.user.sub,
         title: input.title,
-        description: input.description,
+        track: input.track,
+        layer: input.layer,
         timeLimitSeconds: input.timeLimitSeconds,
-        passingScore: input.passingScore,
+        questionIds: input.questionIds,
+        jobId: input.jobId,
+        authorId: ctx.user.sub,
       })
       .returning();
     if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-    return toSummary(row);
+    return toAssessmentSummary(row);
   }),
 
-  update: protectedProcedure.input(updateAssessmentInput).mutation(async ({ ctx, input }) => {
-    const { assessmentId, ...rest } = input;
-    await assertAuthor(assessmentId, ctx.user.sub);
-    const [row] = await db
-      .update(schema.assessments)
-      .set({ ...rest, updatedAt: new Date() })
-      .where(eq(schema.assessments.id, assessmentId))
-      .returning();
-    if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-    return toSummary(row);
-  }),
-
-  setPublished: protectedProcedure.input(setAssessmentPublishedInput).mutation(async ({ ctx, input }) => {
-    await assertAuthor(input.assessmentId, ctx.user.sub);
-    const [row] = await db
-      .update(schema.assessments)
-      .set({ published: input.published, updatedAt: new Date() })
-      .where(eq(schema.assessments.id, input.assessmentId))
-      .returning();
-    if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-    return toSummary(row);
-  }),
-
-  addQuestion: protectedProcedure.input(addQuestionInput).mutation(async ({ ctx, input }) => {
-    await assertAuthor(input.assessmentId, ctx.user.sub);
-
-    const existing = await questionCount(input.assessmentId);
-
-    // Map each kind onto the shared column layout (options + answerKey jsonb).
-    let options: string[] = [];
-    let answerKey: Record<string, unknown> = {};
-    let language: string | undefined;
-    let starterCode: string | undefined;
-
-    switch (input.kind) {
-      case "single_choice":
-        options = input.options;
-        answerKey = { correctIndex: input.correctIndex };
-        break;
-      case "multi_choice":
-        options = input.options;
-        answerKey = { correctIndices: input.correctIndices };
-        break;
-      case "short_answer":
-        answerKey = { acceptable: input.acceptable };
-        break;
-      case "code":
-        answerKey = { keywords: input.keywords };
-        language = input.language;
-        starterCode = input.starterCode;
-        break;
-    }
-
-    const [row] = await db
-      .insert(schema.assessmentQuestions)
-      .values({
-        assessmentId: input.assessmentId,
-        kind: input.kind,
-        prompt: input.prompt,
-        points: input.points,
-        options,
-        answerKey,
-        language,
-        starterCode,
-        order: existing,
-      })
-      .returning();
-    if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-    return { id: row.id };
-  }),
-
-  listMine: protectedProcedure.query(async ({ ctx }) => {
-    const rows = await db.select().from(schema.assessments).where(eq(schema.assessments.authorId, ctx.user.sub));
-    return Promise.all(rows.map(toSummary));
-  }),
-
-  getForEdit: protectedProcedure.input(z.object({ assessmentId: z.string().uuid() })).query(async ({ ctx, input }) => {
-    const row = await assertAuthor(input.assessmentId, ctx.user.sub);
-    const questionRows = await db
-      .select()
-      .from(schema.assessmentQuestions)
-      .where(eq(schema.assessmentQuestions.assessmentId, input.assessmentId))
-      .orderBy(asc(schema.assessmentQuestions.order));
-
-    const questions: AuthorQuestion[] = questionRows.map((q) => ({
-      ...toRunnerQuestion(q),
-      answerKey: q.answerKey as Record<string, unknown>,
-    }));
-
-    const summary = await toSummary(row);
-    const forEdit: AssessmentForEdit = { ...summary, questions };
-    return forEdit;
-  }),
-
-  // --- catalog ---
-
-  listPublished: protectedProcedure
-    .input(z.object({ query: z.string().trim().max(200).optional() }))
-    .query(async ({ input }) => {
-      const whereCondition = input.query
-        ? and(
-            eq(schema.assessments.published, true),
-            or(ilike(schema.assessments.title, `%${input.query}%`), ilike(schema.assessments.description, `%${input.query}%`))
-          )
-        : eq(schema.assessments.published, true);
-
-      const rows = await db.select().from(schema.assessments).where(whereCondition);
-      return Promise.all(rows.map(toSummary));
-    }),
-
-  // --- runner ---
-
-  startAttempt: protectedProcedure.input(startAttemptInput).mutation(async ({ ctx, input }) => {
-    const [assessment] = await db
-      .select()
-      .from(schema.assessments)
-      .where(eq(schema.assessments.id, input.assessmentId))
-      .limit(1);
+  startSession: protectedProcedure.input(startSessionInput).mutation(async ({ ctx, input }) => {
+    const [assessment] = await db.select().from(schema.assessments).where(eq(schema.assessments.id, input.assessmentId)).limit(1);
     if (!assessment) throw new TRPCError({ code: "NOT_FOUND" });
-    if (!assessment.published && assessment.authorId !== ctx.user.sub) {
-      throw new TRPCError({ code: "NOT_FOUND" });
-    }
 
-    const questionRows = await db
+    const [existing] = await db
       .select()
-      .from(schema.assessmentQuestions)
-      .where(eq(schema.assessmentQuestions.assessmentId, assessment.id))
-      .orderBy(asc(schema.assessmentQuestions.order));
-    if (questionRows.length === 0) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "This assessment has no questions yet." });
+      .from(schema.assessmentSessions)
+      .where(
+        and(
+          eq(schema.assessmentSessions.userId, ctx.user.sub),
+          eq(schema.assessmentSessions.assessmentId, assessment.id),
+          eq(schema.assessmentSessions.status, "active"),
+        ),
+      )
+      .limit(1);
+    if (existing) {
+      if (existing.expiresAt > new Date()) {
+        const result: StartSessionResult = { sessionId: existing.id, resumed: true };
+        return result;
+      }
+      await db
+        .update(schema.assessmentSessions)
+        .set({ status: "expired" })
+        .where(eq(schema.assessmentSessions.id, existing.id));
     }
 
-    const [attempt] = await db
-      .insert(schema.assessmentAttempts)
-      .values({ assessmentId: assessment.id, userId: ctx.user.sub })
+    const durationMs = (assessment.timeLimitSeconds ?? SESSION_MINUTES * 60) * 1000;
+    const [session] = await db
+      .insert(schema.assessmentSessions)
+      .values({ assessmentId: assessment.id, userId: ctx.user.sub, expiresAt: new Date(Date.now() + durationMs) })
       .returning();
-    if (!attempt) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+    if (!session) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+    const result: StartSessionResult = { sessionId: session.id, resumed: false };
+    return result;
+  }),
 
-    const result: Attempt = {
-      id: attempt.id,
-      assessmentId: assessment.id,
-      title: assessment.title,
-      timeLimitSeconds: assessment.timeLimitSeconds,
-      startedAt: attempt.startedAt.toISOString(),
-      questions: questionRows.map(toRunnerQuestion), // answer keys stripped
+  getNextQuestion: protectedProcedure.input(getNextQuestionInput).query(async ({ ctx, input }) => {
+    const session = await requireOwnActiveSession(input.sessionId, ctx.user.sub);
+    const [assessment] = await db.select().from(schema.assessments).where(eq(schema.assessments.id, session.assessmentId)).limit(1);
+    if (!assessment) throw new TRPCError({ code: "NOT_FOUND" });
+
+    const questionIds = assessment.questionIds as string[];
+    const qid = questionIds[input.index];
+    if (!qid) {
+      const result: NextQuestionResult = { done: true, total: questionIds.length };
+      return result;
+    }
+
+    const [q] = await db.select().from(schema.questionBank).where(eq(schema.questionBank.id, qid)).limit(1);
+    if (!q) throw new TRPCError({ code: "NOT_FOUND" });
+
+    const result: NextQuestionResult = {
+      done: false,
+      total: questionIds.length,
+      index: input.index,
+      question: {
+        id: q.id,
+        kind: q.kind as QuestionKind,
+        prompt: q.prompt,
+        payload: toSafePayload(q.kind as QuestionKind, q.payload),
+      },
+      expiresAt: session.expiresAt.toISOString(),
     };
     return result;
   }),
 
-  submitAttempt: protectedProcedure.input(submitAttemptInput).mutation(async ({ ctx, input }) => {
-    const [attempt] = await db
-      .select()
-      .from(schema.assessmentAttempts)
-      .where(eq(schema.assessmentAttempts.id, input.attemptId))
-      .limit(1);
-    if (!attempt || attempt.userId !== ctx.user.sub) throw new TRPCError({ code: "NOT_FOUND" });
-    if (attempt.submittedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "This attempt was already submitted." });
-
-    const [assessment] = await db
-      .select()
-      .from(schema.assessments)
-      .where(eq(schema.assessments.id, attempt.assessmentId))
-      .limit(1);
+  submitAnswer: protectedProcedure.input(submitAnswerInput).mutation(async ({ ctx, input }) => {
+    const session = await requireOwnActiveSession(input.sessionId, ctx.user.sub);
+    const [assessment] = await db.select().from(schema.assessments).where(eq(schema.assessments.id, session.assessmentId)).limit(1);
     if (!assessment) throw new TRPCError({ code: "NOT_FOUND" });
+    if (!(assessment.questionIds as string[]).includes(input.questionId)) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Question not in this session." });
+    }
+    const [q] = await db.select().from(schema.questionBank).where(eq(schema.questionBank.id, input.questionId)).limit(1);
+    if (!q) throw new TRPCError({ code: "NOT_FOUND" });
 
-    const questionRows = await db
-      .select()
-      .from(schema.assessmentQuestions)
-      .where(eq(schema.assessmentQuestions.assessmentId, attempt.assessmentId))
-      .orderBy(asc(schema.assessmentQuestions.order));
+    const kind = q.kind as QuestionKind;
 
-    const responseByQuestion = new Map<string, AnswerResponse>();
-    for (const answer of input.answers) responseByQuestion.set(answer.questionId, answer);
-
-    let rawScore = 0;
-    let maxScore = 0;
-    const gradedAnswers: GradedAnswer[] = [];
-
-    for (const q of questionRows) {
-      const response = responseByQuestion.get(q.id);
-      const fraction = gradeAnswer({ kind: q.kind as QuestionKind, answerKey: q.answerKey, points: q.points }, response);
-      const awarded = fraction * q.points;
-      rawScore += awarded;
-      maxScore += q.points;
-
-      await db
-        .insert(schema.attemptAnswers)
-        .values({ attemptId: attempt.id, questionId: q.id, response: response ?? {}, scoreFraction: fraction })
+    // Upsert on the (sessionId, questionId) unique constraint — atomic, so two
+    // concurrent submitAnswer calls for the same question can't race into a
+    // duplicate-key error the way a manual select-then-insert-or-update would.
+    async function upsertAnswer(fields: {
+      correct: boolean | null;
+      scoreFraction: number | null;
+      gradedAt: Date | null;
+    }): Promise<string> {
+      const [row] = await db
+        .insert(schema.answers)
+        .values({ sessionId: input.sessionId, questionId: input.questionId, response: input.response, ...fields })
         .onConflictDoUpdate({
-          target: [schema.attemptAnswers.attemptId, schema.attemptAnswers.questionId],
-          set: { response: response ?? {}, scoreFraction: fraction, gradedAt: new Date() },
-        });
+          target: [schema.answers.sessionId, schema.answers.questionId],
+          set: { response: input.response, ...fields },
+        })
+        .returning({ id: schema.answers.id });
+      return row!.id;
+    }
 
-      gradedAnswers.push({
-        questionId: q.id,
-        prompt: q.prompt,
-        kind: q.kind as QuestionKind,
-        points: q.points,
-        scoreFraction: fraction,
-        awardedPoints: Math.round(awarded * 100) / 100,
+    if (isAsyncGraded(kind)) {
+      if (usingCodeGradingStub) {
+        // No JUDGE0_URL — grade synchronously via the keyword-rubric stub so
+        // local dev without Docker's Judge0 profile still works end-to-end.
+        const fraction = gradeCodeStub(q.payload as { keywords: string[] }, input.response.source ?? "");
+        await upsertAnswer({ correct: fraction === 1, scoreFraction: fraction, gradedAt: new Date() });
+        emitSessionAnswerGraded(input.sessionId, { questionId: input.questionId, scoreFraction: fraction });
+        return { ok: true, pending: false };
+      }
+
+      // Real Judge0 configured — save the response ungraded and enqueue.
+      const answerId = await upsertAnswer({ correct: null, scoreFraction: null, gradedAt: null });
+      await tryEnqueue(
+        getQueues().gradeCode.add("grade", { answerId, sessionId: input.sessionId }),
+        `grade-code (answer ${answerId})`,
+      );
+      return { ok: true, pending: true };
+    }
+
+    // Sync-gradable kinds.
+    const result = gradeSyncAnswer(kind, q.payload, input.response);
+    if (!result) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+    await upsertAnswer({ correct: result.correct, scoreFraction: result.scoreFraction, gradedAt: new Date() });
+    emitSessionAnswerGraded(input.sessionId, { questionId: input.questionId, scoreFraction: result.scoreFraction });
+    return { ok: true, pending: false };
+  }),
+
+  recordTelemetry: protectedProcedure.input(recordTelemetryInput).mutation(async ({ ctx, input }) => {
+    const session = await requireOwnActiveSession(input.sessionId, ctx.user.sub);
+    const telemetry = { ...(session.telemetry as Record<string, number>) };
+    telemetry[input.event] = (telemetry[input.event] ?? 0) + 1;
+    await db.update(schema.assessmentSessions).set({ telemetry }).where(eq(schema.assessmentSessions.id, session.id));
+
+    if ((input.event === "blur" || input.event === "paste") && telemetry[input.event]! >= INTEGRITY_FLAG_THRESHOLD) {
+      emitIntegrityFlag(session.assessmentId, {
+        sessionId: session.id,
+        userId: ctx.user.sub,
+        event: input.event,
+        count: telemetry[input.event]!,
       });
     }
+    return { ok: true };
+  }),
 
-    const percent = maxScore > 0 ? Math.round((rawScore / maxScore) * 100) : 0;
-    const passed = maxScore > 0 && rawScore / maxScore >= assessment.passingScore;
-    const submittedAt = new Date();
+  submitSession: protectedProcedure.input(submitSessionInput).mutation(async ({ ctx, input }) => {
+    const session = await requireOwnActiveSession(input.sessionId, ctx.user.sub);
+    const [assessment] = await db.select().from(schema.assessments).where(eq(schema.assessments.id, session.assessmentId)).limit(1);
+    if (!assessment) throw new TRPCError({ code: "NOT_FOUND" });
+
+    const questionRows = await db
+      .select()
+      .from(schema.questionBank)
+      .where(inArray(schema.questionBank.id, assessment.questionIds as string[]));
+    const kindById = new Map(questionRows.map((q) => [q.id, q.kind as QuestionKind]));
+
+    const answerRows = await db.select().from(schema.answers).where(eq(schema.answers.sessionId, session.id));
+    const graded = answerRows.filter((a) => a.gradedAt !== null);
+    const pending = answerRows.some((a) => a.gradedAt === null);
+
+    const rawScore = computeRawScore(graded.map((a) => ({ kind: kindById.get(a.questionId)!, scoreFraction: a.scoreFraction ?? 0 })));
+
+    const cohort = await db
+      .select({ rawScore: schema.trackResults.rawScore })
+      .from(schema.trackResults)
+      .where(and(eq(schema.trackResults.track, assessment.track), ne(schema.trackResults.userId, ctx.user.sub)));
+    const percentile = percentileOf(rawScore, cohort.map((c) => c.rawScore));
 
     await db
-      .update(schema.assessmentAttempts)
-      .set({ rawScore, maxScore, passed, submittedAt })
-      .where(eq(schema.assessmentAttempts.id, attempt.id));
+      .update(schema.assessmentSessions)
+      .set({ status: pending ? "submitted" : "graded", submittedAt: new Date() })
+      .where(eq(schema.assessmentSessions.id, session.id));
+    await db
+      .insert(schema.trackResults)
+      .values({ userId: ctx.user.sub, sessionId: session.id, track: assessment.track, rawScore, percentile });
 
-    const result: AttemptResult = {
-      attemptId: attempt.id,
-      assessmentId: assessment.id,
-      title: assessment.title,
-      rawScore: Math.round(rawScore * 100) / 100,
-      maxScore,
-      percent,
-      passed,
-      passingScore: assessment.passingScore,
-      submittedAt: submittedAt.toISOString(),
-      answers: gradedAnswers,
-    };
+    if (!pending) emitSessionGraded(session.id, { rawScore, percentile });
+
+    const result: SubmitSessionResult = { rawScore, percentile, pending };
     return result;
   }),
 
-  myAttempts: protectedProcedure.query(async ({ ctx }) => {
+  myHistory: protectedProcedure.query(async ({ ctx }) => {
     const rows = await db
-      .select()
-      .from(schema.assessmentAttempts)
-      .where(and(eq(schema.assessmentAttempts.userId, ctx.user.sub), isNotNull(schema.assessmentAttempts.submittedAt)))
-      .orderBy(desc(schema.assessmentAttempts.submittedAt));
+      .select({
+        sessionId: schema.trackResults.sessionId,
+        assessmentId: schema.assessmentSessions.assessmentId,
+        track: schema.trackResults.track,
+        rawScore: schema.trackResults.rawScore,
+        percentile: schema.trackResults.percentile,
+        earnedAt: schema.trackResults.earnedAt,
+      })
+      .from(schema.trackResults)
+      .innerJoin(schema.assessmentSessions, eq(schema.assessmentSessions.id, schema.trackResults.sessionId))
+      .where(eq(schema.trackResults.userId, ctx.user.sub))
+      .orderBy(desc(schema.trackResults.earnedAt));
 
     return Promise.all(
-      rows.map(async (a) => {
+      rows.map(async (r): Promise<TrackResultHistoryItem> => {
         const [assessment] = await db
-          .select()
+          .select({ title: schema.assessments.title })
           .from(schema.assessments)
-          .where(eq(schema.assessments.id, a.assessmentId))
+          .where(eq(schema.assessments.id, r.assessmentId))
           .limit(1);
-        const percent = a.maxScore && a.maxScore > 0 ? Math.round(((a.rawScore ?? 0) / a.maxScore) * 100) : 0;
         return {
-          attemptId: a.id,
-          assessmentId: a.assessmentId,
-          title: assessment?.title || "",
-          percent,
-          passed: Boolean(a.passed),
-          submittedAt: (a.submittedAt ?? a.startedAt).toISOString(),
+          sessionId: r.sessionId,
+          assessmentId: r.assessmentId,
+          assessmentTitle: assessment?.title ?? "",
+          track: r.track as TrackResultHistoryItem["track"],
+          rawScore: r.rawScore,
+          percentile: r.percentile,
+          earnedAt: r.earnedAt.toISOString(),
         };
-      })
+      }),
     );
   }),
 });
