@@ -48,6 +48,15 @@ writes answers.scoreFraction/correct, then on last-answer-graded:
 Socket.IO (existing apps/api/src/lib/realtime.ts) emits session:graded / integrity:flag
 ```
 
+## Score scale (resolved ambiguity)
+
+`computeTrafyPoints` and `track_results.percentile` are both 0–100 (percentile-based,
+verbatim from trafy-platform's `scoring.ts`). The vision doc's illustrative
+`"AI Engineer ≥ 650 to apply"` phrasing does **not** map onto this scale — there is no
+0–850 (or similar) conversion. Score gates, recruiter filters, and profile display all use
+the native 0–100 number as-is (e.g. "≥ 75 Trafy Points" / "≥ 75th percentile"), decided here
+rather than left for a later spec to rediscover.
+
 ## Data model
 
 Replaces `assessments`, `assessment_questions`, `assessment_attempts`, `attempt_answers`
