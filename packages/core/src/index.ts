@@ -10,6 +10,8 @@ export * from "./notification.js";
 export * from "./course.js";
 export * from "./payment.js";
 export * from "./group.js";
+export * from "./types.js";
+export * from "./scoring.js";
 export * from "./assessment.js";
 export * from "./job.js";
 export * from "./application.js";
