@@ -14,3 +14,13 @@ export const discoverResultSchema = z.object({
   following: z.boolean(),
 });
 export type DiscoverResult = z.infer<typeof discoverResultSchema>;
+
+export const suggestPeopleOutput = z.array(z.object({
+  userId: z.string().uuid(),
+  fullName: z.string(),
+  title: z.string().optional(),
+  mutualCount: z.number().int(),
+  sharedCollege: z.boolean().optional(),
+  connectionStatus: z.enum(["pending", "accepted", "rejected", "withdrawn"]).nullable(),
+}));
+export type SuggestPeopleOutput = z.infer<typeof suggestPeopleOutput>;
