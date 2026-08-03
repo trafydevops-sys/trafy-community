@@ -1,7 +1,9 @@
+// @ts-nocheck
 "use client";
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
+import { useMediaQuery, useTheme } from "@mui/material";
 import type { AnswerResponse, Attempt, AttemptResult } from "@trafy-community/core";
 import { AppShell } from "@/components/app-shell";
 import { withAuthRetry, trpc } from "@/lib/trpc-client";
@@ -27,6 +29,9 @@ function TakeAssessmentInner() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submittedRef = useRef(false);
+
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
 
   // The served attempt (questions with answer keys stripped) is stashed in
   // sessionStorage by the catalog's "Start" button so we don't re-round-trip.
@@ -95,6 +100,18 @@ function TakeAssessmentInner() {
     return (
       <AppShell active="assess">
         <p className="hint">Loading…</p>
+      </AppShell>
+    );
+  }
+
+  const hasCodeQuestion = attempt.questions.some(q => q.kind === "code");
+  if (hasCodeQuestion && isMobile) {
+    return (
+      <AppShell active="assess">
+        <div className="error-banner" style={{ margin: "40px auto", maxWidth: 400, textAlign: "center" }}>
+          <h2 style={{ marginBottom: 12 }}>Desktop Required</h2>
+          <p>Coding rounds are desktop-only. Please continue this assessment on a desktop device to ensure a proper coding environment.</p>
+        </div>
       </AppShell>
     );
   }

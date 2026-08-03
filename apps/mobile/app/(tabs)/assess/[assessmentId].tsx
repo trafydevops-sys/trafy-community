@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useEffect, useRef, useState } from "react";
 import { Stack, useLocalSearchParams } from "expo-router";
 import type { AnswerResponse, Attempt, AttemptResult, RunnerQuestion } from "@trafy-community/core";

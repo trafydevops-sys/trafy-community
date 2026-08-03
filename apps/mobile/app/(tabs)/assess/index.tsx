@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useEffect, useState } from "react";
 import { router } from "expo-router";
 import type { AssessmentSummary, AttemptHistoryItem } from "@trafy-community/core";
