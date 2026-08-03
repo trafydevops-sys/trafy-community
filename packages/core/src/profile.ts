@@ -29,9 +29,29 @@ export const certificateSchema = z.object({
 });
 export type Certificate = z.infer<typeof certificateSchema>;
 
+export const USER_ROLES = ["talent", "recruiter", "instructor", "institution"] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+
+export const ONBOARDING_GOALS = ["get-a-job", "upskill", "switch-track", "hire", "teach", "learn-ai"] as const;
+export type OnboardingGoal = (typeof ONBOARDING_GOALS)[number];
+
+// A naive mapping from goal to suggested track, just for onboarding personalization.
+export const GOAL_TO_TRACK: Record<OnboardingGoal, string | null> = {
+  "get-a-job": "backend",
+  "upskill": "frontend",
+  "switch-track": "data",
+  "learn-ai": "ai",
+  "hire": null,
+  "teach": null,
+};
+
 // Step-by-step Profile Creation wizard, mirroring the wireframe fields
 // (full name, email, bio, title, education, experience, certificates).
 export const profileWizardInput = z.object({
+  userRole: z.enum(USER_ROLES).optional(),
+  goals: z.array(z.enum(ONBOARDING_GOALS)).default([]),
+  resumeUrl: z.string().optional(),
+  onboardingCompleted: z.boolean().default(false),
   fullName: z.string().trim().min(1).max(120),
   bio: z.string().trim().max(1000).optional(),
   title: z.string().trim().max(160).optional(),

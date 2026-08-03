@@ -3,6 +3,7 @@ import { z } from "zod";
 export const notificationTypeSchema = z.enum([
   "new_follower",
   "post_reaction",
+  "post_comment",
   "chat_message",
   "course_sale",
   "job_application",
@@ -11,6 +12,8 @@ export const notificationTypeSchema = z.enum([
   "milestone_funded",
   "milestone_released",
   "org_invite",
+  "connection_request",
+  "connection_accepted",
 ]);
 export type NotificationType = z.infer<typeof notificationTypeSchema>;
 
