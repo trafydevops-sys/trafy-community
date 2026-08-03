@@ -88,6 +88,7 @@ export default function ChatThreadScreen() {
       senderName: "You",
       body: text,
       createdAt: new Date().toISOString(),
+      isInmail: false,
     };
     setMessages((current) => [...current, optimistic]);
     setBody("");
