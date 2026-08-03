@@ -6,6 +6,7 @@ import {
   refreshInput,
   requestOtpInput,
   verifyOtpInput,
+  oauthCallbackInput,
 } from "@trafy-community/core";
 import { z } from "zod";
 import { router, publicProcedure, protectedProcedure } from "../lib/trpc.js";
@@ -13,7 +14,8 @@ import { db } from "../lib/db.js";
 import { checkRequestRateLimit, generateOtpCode, storeOtpCode, verifyAndConsumeOtpCode } from "../lib/otp.js";
 import { sendOtpEmail } from "../lib/mail.js";
 import { consumeRefreshToken, issueRefreshToken, revokeRefreshToken, signAccessToken } from "../lib/tokens.js";
-import { usingEmailStub } from "../lib/env.js";
+import { usingEmailStub, env } from "../lib/env.js";
+import { exchangeGoogleCode, exchangeLinkedinCode } from "../lib/oauth.js";
 
 async function findOrCreateUser(email: string) {
   const [existing] = await db.select().from(schema.users).where(eq(schema.users.email, email)).limit(1);
@@ -60,6 +62,32 @@ export const authRouter = router({
 
     const user = await findOrCreateUser(input.email);
     return issueSessionFor(user.id, user.email);
+  }),
+
+  oauthCallback: publicProcedure.input(oauthCallbackInput).mutation(async ({ input }) => {
+    try {
+      let email: string;
+      if (input.provider === "google") {
+        email = await exchangeGoogleCode(input.code, input.redirectUri);
+      } else if (input.provider === "linkedin") {
+        email = await exchangeLinkedinCode(input.code, input.redirectUri);
+      } else {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Unsupported provider" });
+      }
+
+      const user = await findOrCreateUser(email);
+      return issueSessionFor(user.id, user.email);
+    } catch (err) {
+      if (err instanceof TRPCError) throw err;
+      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: (err as Error).message });
+    }
+  }),
+
+  oauthConfig: publicProcedure.query(() => {
+    return {
+      googleClientId: env.GOOGLE_CLIENT_ID || null,
+      linkedinClientId: env.LINKEDIN_CLIENT_ID || null,
+    };
   }),
 
   refresh: publicProcedure.input(refreshInput).mutation(async ({ input }) => {

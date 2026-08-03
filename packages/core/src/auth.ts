@@ -19,6 +19,13 @@ export const verifyOtpInput = z.object({
 });
 export type VerifyOtpInput = z.infer<typeof verifyOtpInput>;
 
+export const oauthCallbackInput = z.object({
+  provider: z.enum(["google", "linkedin"]),
+  code: z.string().min(1),
+  redirectUri: z.string().url(),
+});
+export type OauthCallbackInput = z.infer<typeof oauthCallbackInput>;
+
 export const refreshInput = z.object({
   refreshToken: z.string().min(1),
 });

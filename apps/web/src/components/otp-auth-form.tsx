@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { TRPCClientError } from "@trpc/client";
 import Container from "@mui/material/Container";
@@ -10,6 +10,7 @@ import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
 import Alert from "@mui/material/Alert";
 import Stack from "@mui/material/Stack";
+import Divider from "@mui/material/Divider";
 import { trpc } from "@/lib/trpc-client";
 import { useAuth } from "@/lib/auth-context";
 
@@ -25,6 +26,11 @@ export function OtpAuthForm({ heading, subheading }: { heading: string; subheadi
   const [devCode, setDevCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [oauthConfig, setOauthConfig] = useState<{ googleClientId: string | null; linkedinClientId: string | null } | null>(null);
+
+  useEffect(() => {
+    trpc.auth.oauthConfig.query().then(setOauthConfig).catch(console.error);
+  }, []);
 
   async function handleRequestOtp(e: FormEvent) {
     e.preventDefault();
@@ -78,6 +84,36 @@ export function OtpAuthForm({ heading, subheading }: { heading: string; subheadi
 
           {step === "email" ? (
             <Stack component="form" onSubmit={handleRequestOtp} spacing={2}>
+              {oauthConfig && (oauthConfig.googleClientId || oauthConfig.linkedinClientId) && (
+                <>
+                  {oauthConfig.googleClientId && (
+                    <Button 
+                      variant="outlined" 
+                      fullWidth 
+                      size="large" 
+                      onClick={() => {
+                        window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${oauthConfig.googleClientId}&redirect_uri=${window.location.origin}/auth/callback&response_type=code&scope=email%20profile&state=google`;
+                      }}
+                    >
+                      Continue with Google
+                    </Button>
+                  )}
+                  {oauthConfig.linkedinClientId && (
+                    <Button 
+                      variant="outlined" 
+                      fullWidth 
+                      size="large" 
+                      onClick={() => {
+                        window.location.href = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${oauthConfig.linkedinClientId}&redirect_uri=${window.location.origin}/auth/callback&state=linkedin&scope=openid%20profile%20email`;
+                      }}
+                    >
+                      Continue with LinkedIn
+                    </Button>
+                  )}
+                  <Divider sx={{ my: 1, color: "text.secondary", fontSize: "0.875rem" }}>or</Divider>
+                </>
+              )}
+
               <TextField
                 id="email"
                 label="Email"
