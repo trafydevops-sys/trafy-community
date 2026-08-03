@@ -8,7 +8,8 @@ import { withAuthRetry, trpc } from "@/lib/trpc-client";
 
 const COLUMNS: { key: ApplicationStatus; label: string }[] = [
   { key: "applied", label: "Applied" },
-  { key: "reviewing", label: "Reviewing" },
+  { key: "screening", label: "Screening" },
+  { key: "assessment", label: "Assessment" },
   { key: "interview", label: "Interview" },
   { key: "offer", label: "Offer" },
   { key: "hired", label: "Hired" },
