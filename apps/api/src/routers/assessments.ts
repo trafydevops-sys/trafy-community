@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server";
+import { z } from "zod";
 import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { schema } from "@trafy-community/db";
 import {
@@ -24,6 +25,8 @@ import {
   type StartSessionResult,
   type SubmitSessionResult,
   type TrackResultHistoryItem,
+  submitAppealInput,
+  resolveFlagInput,
 } from "@trafy-community/core";
 import { router, protectedProcedure } from "../lib/trpc.js";
 import { db } from "../lib/db.js";
@@ -152,6 +155,30 @@ export const assessmentsRouter = router({
     const [assessment] = await db.select().from(schema.assessments).where(eq(schema.assessments.id, input.assessmentId)).limit(1);
     if (!assessment) throw new TRPCError({ code: "NOT_FOUND" });
 
+    if (assessment.inviteOnly) {
+      if (!input.inviteToken) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "This assessment requires an invite." });
+      }
+      const [invite] = await db
+        .select()
+        .from(schema.assessmentInvites)
+        .where(
+          and(
+            eq(schema.assessmentInvites.token, input.inviteToken),
+            eq(schema.assessmentInvites.assessmentId, assessment.id)
+          )
+        )
+        .limit(1);
+      if (!invite) throw new TRPCError({ code: "NOT_FOUND", message: "Invite not found." });
+      if (invite.expiresAt <= new Date()) throw new TRPCError({ code: "BAD_REQUEST", message: "Invite expired." });
+      if (invite.status === "completed") throw new TRPCError({ code: "BAD_REQUEST", message: "Invite already used." });
+      
+      await db
+        .update(schema.assessmentInvites)
+        .set({ status: "accepted" })
+        .where(eq(schema.assessmentInvites.id, invite.id));
+    }
+
     const [existing] = await db
       .select()
       .from(schema.assessmentSessions)
@@ -177,7 +204,13 @@ export const assessmentsRouter = router({
     const durationMs = (assessment.timeLimitSeconds ?? SESSION_MINUTES * 60) * 1000;
     const [session] = await db
       .insert(schema.assessmentSessions)
-      .values({ assessmentId: assessment.id, userId: ctx.user.sub, expiresAt: new Date(Date.now() + durationMs) })
+      .values({ 
+        assessmentId: assessment.id, 
+        userId: ctx.user.sub, 
+        expiresAt: new Date(Date.now() + durationMs),
+        webcamConsent: input.webcamConsent,
+        webcamEnabled: input.webcamConsent,
+      })
       .returning();
     if (!session) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
     const result: StartSessionResult = { sessionId: session.id, resumed: false };
@@ -274,6 +307,17 @@ export const assessmentsRouter = router({
 
   recordTelemetry: protectedProcedure.input(recordTelemetryInput).mutation(async ({ ctx, input }) => {
     const session = await requireOwnActiveSession(input.sessionId, ctx.user.sub);
+    
+    if (input.event === "webcam_snapshot") {
+      if (input.snapshotUrl && session.webcamEnabled) {
+        await db.insert(schema.webcamSnapshots).values({
+          sessionId: session.id,
+          imageUrl: input.snapshotUrl,
+        });
+      }
+      return { ok: true };
+    }
+
     const telemetry = { ...(session.telemetry as Record<string, number>) };
     telemetry[input.event] = (telemetry[input.event] ?? 0) + 1;
     await db.update(schema.assessmentSessions).set({ telemetry }).where(eq(schema.assessmentSessions.id, session.id));
@@ -284,6 +328,16 @@ export const assessmentsRouter = router({
         userId: ctx.user.sub,
         event: input.event,
         count: telemetry[input.event]!,
+      });
+
+      // Persist flag to database
+      await db.insert(schema.integrityFlags).values({
+        sessionId: session.id,
+        userId: ctx.user.sub,
+        kind: input.event === "blur" ? "tab_blur" : "paste",
+        severity: "warning",
+        detail: { count: telemetry[input.event]! },
+        resolution: "pending",
       });
     }
     return { ok: true };
@@ -322,7 +376,38 @@ export const assessmentsRouter = router({
 
     if (!pending) emitSessionGraded(session.id, { rawScore, percentile });
 
+    // Auto-post an achievement card when the candidate clears a layer (score >= 60%).
+    // This is intentionally fire-and-forget — never block the response on it.
+    if (!pending && rawScore >= 0.6) {
+      const name = await authorName(ctx.user.sub);
+      const percentileStr = Math.round(percentile);
+      const scoreStr = Math.round(rawScore * 100);
+      const body = `🏆 ${name} cleared the ${assessment.track} Layer ${assessment.layer} assessment — scored ${scoreStr}%, ${percentileStr}th percentile!`;
+      db.insert(schema.posts)
+        .values({
+          authorId: ctx.user.sub,
+          body,
+          kind: "achievement",
+        })
+        .catch((err) => console.error("[achievement-post] Failed:", err));
+    }
+
     const result: SubmitSessionResult = { rawScore, percentile, pending };
+    
+    // Background Integrity Checks
+    if (session.webcamEnabled) {
+      await tryEnqueue(
+        getQueues().faceMatch.add("face-match", { sessionId: session.id }),
+        `face-match (session ${session.id})`
+      );
+    }
+    
+    // Always run plagiarism check for submitted code answers
+    await tryEnqueue(
+      getQueues().plagiarismCheck.add("plagiarism-check", { sessionId: session.id }),
+      `plagiarism-check (session ${session.id})`
+    );
+
     return result;
   }),
 
@@ -359,5 +444,72 @@ export const assessmentsRouter = router({
         };
       }),
     );
+  }),
+
+  myFlags: protectedProcedure.input(z.object({ sessionId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    const session = await requireOwnActiveSession(input.sessionId, ctx.user.sub);
+    return db
+      .select()
+      .from(schema.integrityFlags)
+      .where(and(eq(schema.integrityFlags.sessionId, session.id), eq(schema.integrityFlags.visible, true)))
+      .orderBy(desc(schema.integrityFlags.createdAt));
+  }),
+
+  submitAppeal: protectedProcedure.input(submitAppealInput).mutation(async ({ ctx, input }) => {
+    const [flag] = await db
+      .select()
+      .from(schema.integrityFlags)
+      .where(and(eq(schema.integrityFlags.id, input.flagId), eq(schema.integrityFlags.userId, ctx.user.sub)))
+      .limit(1);
+    if (!flag) throw new TRPCError({ code: "NOT_FOUND" });
+    if (!flag.visible) throw new TRPCError({ code: "FORBIDDEN" });
+    if (flag.resolution && flag.resolution !== "pending") {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Flag already resolved" });
+    }
+
+    await db
+      .update(schema.integrityFlags)
+      .set({ appealText: input.text, appealedAt: new Date(), resolution: "pending" })
+      .where(eq(schema.integrityFlags.id, input.flagId));
+    return { ok: true };
+  }),
+
+  resolveFlag: protectedProcedure.input(resolveFlagInput).mutation(async ({ ctx, input }) => {
+    // Only author of the assessment can resolve (simplified auth check for now)
+    const [flag] = await db.select().from(schema.integrityFlags).where(eq(schema.integrityFlags.id, input.flagId)).limit(1);
+    if (!flag) throw new TRPCError({ code: "NOT_FOUND" });
+    
+    const [session] = await db.select().from(schema.assessmentSessions).where(eq(schema.assessmentSessions.id, flag.sessionId)).limit(1);
+    if (!session) throw new TRPCError({ code: "NOT_FOUND" });
+    
+    const [assessment] = await db.select().from(schema.assessments).where(eq(schema.assessments.id, session.assessmentId)).limit(1);
+    if (!assessment) throw new TRPCError({ code: "NOT_FOUND" });
+    if (assessment.authorId !== ctx.user.sub) throw new TRPCError({ code: "FORBIDDEN" });
+
+    await db
+      .update(schema.integrityFlags)
+      .set({ 
+        resolution: input.resolution, 
+        resolvedBy: ctx.user.sub, 
+        resolvedAt: new Date(),
+        resolverNotes: input.notes,
+      })
+      .where(eq(schema.integrityFlags.id, input.flagId));
+    return { ok: true };
+  }),
+
+  listFlagsBySession: protectedProcedure.input(z.object({ sessionId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    const [session] = await db.select().from(schema.assessmentSessions).where(eq(schema.assessmentSessions.id, input.sessionId)).limit(1);
+    if (!session) throw new TRPCError({ code: "NOT_FOUND" });
+    
+    const [assessment] = await db.select().from(schema.assessments).where(eq(schema.assessments.id, session.assessmentId)).limit(1);
+    if (!assessment) throw new TRPCError({ code: "NOT_FOUND" });
+    if (assessment.authorId !== ctx.user.sub) throw new TRPCError({ code: "FORBIDDEN" });
+
+    return db
+      .select()
+      .from(schema.integrityFlags)
+      .where(eq(schema.integrityFlags.sessionId, input.sessionId))
+      .orderBy(desc(schema.integrityFlags.createdAt));
   }),
 });

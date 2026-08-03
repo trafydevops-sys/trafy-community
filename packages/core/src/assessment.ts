@@ -292,7 +292,11 @@ export type AssessmentSummary = z.infer<typeof assessmentSummarySchema>;
 
 /* ── Sessions (runner, tRPC input/output) ── */
 
-export const startSessionInput = z.object({ assessmentId: z.string().uuid() });
+export const startSessionInput = z.object({
+  assessmentId: z.string().uuid(),
+  webcamConsent: z.boolean().default(false),
+  inviteToken: z.string().optional(),
+});
 export type StartSessionInput = z.infer<typeof startSessionInput>;
 
 export const startSessionResultSchema = z.object({ sessionId: z.string().uuid(), resumed: z.boolean() });
@@ -335,7 +339,8 @@ export type SubmitAnswerInput = z.infer<typeof submitAnswerInput>;
 
 export const recordTelemetryInput = z.object({
   sessionId: z.string().uuid(),
-  event: z.enum(["blur", "paste", "fullscreen-exit"]),
+  event: z.enum(["blur", "paste", "fullscreen-exit", "webcam_snapshot"]),
+  snapshotUrl: z.string().url().optional(),
 });
 export type RecordTelemetryInput = z.infer<typeof recordTelemetryInput>;
 
@@ -359,3 +364,87 @@ export const trackResultHistoryItemSchema = z.object({
   earnedAt: z.string(),
 });
 export type TrackResultHistoryItem = z.infer<typeof trackResultHistoryItemSchema>;
+
+// ─── Integrity Flags ───
+
+export const integrityFlagKindSchema = z.enum([
+  'tab_blur', 'paste', 'fullscreen_exit', 'webcam_anomaly', 'plagiarism',
+]);
+
+export const integrityFlagSchema = z.object({
+  id:           z.string().uuid(),
+  sessionId:    z.string().uuid(),
+  kind:         integrityFlagKindSchema,
+  severity:     z.enum(['info', 'warning', 'critical']),
+  detail:       z.record(z.unknown()),
+  appealText:   z.string().nullable().optional(),
+  appealedAt:   z.string().nullable().optional(),
+  resolution:   z.enum(['dismissed', 'upheld', 'pending']).nullable().optional(),
+  resolverNotes: z.string().nullable().optional(),
+  createdAt:    z.string(),
+});
+
+export const submitAppealInput = z.object({
+  flagId: z.string().uuid(),
+  text:   z.string().trim().min(10).max(3000),
+});
+
+export const resolveFlagInput = z.object({
+  flagId:     z.string().uuid(),
+  resolution: z.enum(['dismissed', 'upheld']),
+  notes:      z.string().max(2000).optional(),
+});
+
+// ─── Recruiter Console ───
+
+export const layerConfigSchema = z.object({
+  l1: z.boolean().default(true),
+  l2: z.boolean().default(false),
+  l3: z.boolean().default(false),
+  l4: z.boolean().default(false),
+});
+
+export const generateFromJdInput = z.object({
+  jdText:  z.string().min(50).max(20000),
+  track:   trackSchema,
+  layer:   z.union([z.literal(1), z.literal(2)]).default(1),
+});
+
+export const jdSuggestionsSchema = z.object({
+  suggestedTitle:  z.string(),
+  suggestedQuestionIds: z.array(z.string().uuid()),
+  skillsExtracted: z.array(z.string()),
+  difficultyRange: z.object({ min: z.number(), max: z.number() }),
+});
+
+export const createInviteInput = z.object({
+  assessmentId: z.string().uuid(),
+  emails:       z.array(z.string().email()).max(100).optional(),
+  userIds:      z.array(z.string().uuid()).max(100).optional(),
+  expiresInDays: z.number().int().min(1).max(30).default(7),
+});
+
+export const assessmentResultSchema = z.object({
+  sessionId:    z.string().uuid(),
+  candidateId:  z.string().uuid(),
+  candidateName: z.string(),
+  candidateEmail: z.string(),
+  track:        trackSchema,
+  layer:        z.number().int(),
+  rawScore:     z.number(),
+  percentile:   z.number(),
+  status:       z.string(),
+  flagCount:    z.number().int(),
+  flagSeverity: z.enum(['none', 'info', 'warning', 'critical']),
+  startedAt:    z.string(),
+  submittedAt:  z.string().nullable(),
+  timeSpentMinutes: z.number(),
+});
+
+export const compareInput = z.object({
+  sessionIds: z.array(z.string().uuid()).min(2).max(5),
+});
+
+export const exportResultsInput = z.object({
+  assessmentId: z.string().uuid(),
+});
