@@ -71,6 +71,76 @@
       "when": 1785697860996,
       "tag": "0009_create_assessment_foundation_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785705479095,
+      "tag": "0010_elite_plazm",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785706614653,
+      "tag": "0011_natural_zuras",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1785709918082,
+      "tag": "0012_colossal_invisible_woman",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1785720915742,
+      "tag": "0013_complex_george_stacy",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1785722411326,
+      "tag": "0014_stale_lizard",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1785724534398,
+      "tag": "0015_steep_maelstrom",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1785738494439,
+      "tag": "0016_tricky_mandarin",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1785742818271,
+      "tag": "0017_goofy_agent_zero",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785744473529,
+      "tag": "0018_stormy_photon",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785746245195,
+      "tag": "0019_strange_human_cannonball",
+      "breakpoints": true
     }
   ]
 }
