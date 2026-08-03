@@ -28,16 +28,46 @@ function producerConnection() {
 }
 
 export type GradeCodeJob = { answerId: string; sessionId: string };
+export type PlagiarismCheckJob = { sessionId: string };
+export type FaceMatchJob = { sessionId: string };
+export type VivaQuestionsJob = { vivaId: string; submissionId: string };
+export type VivaGradingJob = { vivaId: string };
+export type BuildHarnessJob = { submissionId: string };
 
-let queues: { gradeCode: Queue<GradeCodeJob> } | null = null;
+let queues: { 
+  gradeCode: Queue<GradeCodeJob>;
+  plagiarismCheck: Queue<PlagiarismCheckJob>;
+  faceMatch: Queue<FaceMatchJob>;
+  vivaQuestions: Queue<VivaQuestionsJob>;
+  vivaGrading: Queue<VivaGradingJob>;
+  buildHarness: Queue<BuildHarnessJob>;
+} | null = null;
 
 export function getQueues() {
   if (!queues) {
     queues = {
       gradeCode: new Queue<GradeCodeJob>("grade-code", {
         connection: producerConnection(),
-        // 3 attempts with exponential backoff — never silently drop a
-        // submission, but don't retry forever either.
+        defaultJobOptions: { attempts: 3, backoff: { type: "exponential", delay: 2000 } },
+      }),
+      plagiarismCheck: new Queue<PlagiarismCheckJob>("plagiarism-check", {
+        connection: producerConnection(),
+        defaultJobOptions: { attempts: 3, backoff: { type: "exponential", delay: 2000 } },
+      }),
+      faceMatch: new Queue<FaceMatchJob>("face-match", {
+        connection: producerConnection(),
+        defaultJobOptions: { attempts: 3, backoff: { type: "exponential", delay: 2000 } },
+      }),
+      vivaQuestions: new Queue<VivaQuestionsJob>("viva-questions", {
+        connection: producerConnection(),
+        defaultJobOptions: { attempts: 3, backoff: { type: "exponential", delay: 2000 } },
+      }),
+      vivaGrading: new Queue<VivaGradingJob>("viva-grading", {
+        connection: producerConnection(),
+        defaultJobOptions: { attempts: 3, backoff: { type: "exponential", delay: 2000 } },
+      }),
+      buildHarness: new Queue<BuildHarnessJob>("build-harness", {
+        connection: producerConnection(),
         defaultJobOptions: { attempts: 3, backoff: { type: "exponential", delay: 2000 } },
       }),
     };

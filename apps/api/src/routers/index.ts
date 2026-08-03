@@ -16,6 +16,13 @@ import { contractsRouter } from "./contracts.js";
 import { organizationsRouter } from "./organizations.js";
 import { pushRouter } from "./push.js";
 import { liveRouter } from "./live.js";
+import { onboardingRouter } from "./onboarding.js";
+import { recruiterConsoleRouter } from "./recruiter-console.js";
+import { vivaRouter } from "./viva.js";
+import { analyticsRouter } from "./analytics.js";
+import { batchesRouter } from "./batches.js";
+import { connectionsRouter } from "./connections.js";
+import { buildMissionsRouter } from "./build-missions.js";
 
 export const appRouter = router({
   auth: authRouter,
@@ -35,6 +42,13 @@ export const appRouter = router({
   organizations: organizationsRouter,
   push: pushRouter,
   live: liveRouter,
+  onboarding: onboardingRouter,
+  recruiterConsole: recruiterConsoleRouter,
+  viva: vivaRouter,
+  analytics: analyticsRouter,
+  batches: batchesRouter,
+  connections: connectionsRouter,
+  buildMissions: buildMissionsRouter,
 });
 
 export type AppRouter = typeof appRouter;

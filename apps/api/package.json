@@ -24,6 +24,8 @@
     "ioredis": "^5.4.1",
     "jose": "^5.9.6",
     "livekit-server-sdk": "^2.17.0",
+    "playwright": "^1.62.1",
+    "resend": "^6.18.1",
     "socket.io": "^4.8.1",
     "zod": "^3.23.8"
   },

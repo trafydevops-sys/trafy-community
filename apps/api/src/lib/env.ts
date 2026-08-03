@@ -22,6 +22,13 @@ const envSchema = z.object({
   API_PORT: z.coerce.number().default(4000),
   API_URL: z.string().default("http://localhost:4000"),
   WEB_URL: z.string().default("http://localhost:3000"),
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  LINKEDIN_CLIENT_ID: z.string().optional(),
+  LINKEDIN_CLIENT_SECRET: z.string().optional(),
+  GEMINI_API_KEY: z.string().optional(),
+  OPENAI_API_KEY: z.string().optional(),
+  DEEPGRAM_API_KEY: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
