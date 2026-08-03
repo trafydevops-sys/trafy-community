@@ -57,6 +57,15 @@ export function initRealtime(httpServer: HttpServer): Server {
     socket.on("assessment:live:leave", (assessmentId: string) => {
       socket.leave(`assessment:${assessmentId}:live`);
     });
+
+    // ATS Pipeline: Recruiter joins to receive real-time updates when other
+    // recruiters move cards on the Kanban board.
+    socket.on("pipeline:join", (jobId: string) => {
+      socket.join(`pipeline:${jobId}`);
+    });
+    socket.on("pipeline:leave", (jobId: string) => {
+      socket.leave(`pipeline:${jobId}`);
+    });
   });
 
   return io;
@@ -64,6 +73,10 @@ export function initRealtime(httpServer: HttpServer): Server {
 
 export function emitNewMessage(event: SocketMessageEvent): void {
   io?.to(`channel:${event.channelId}`).emit("message:new", event);
+}
+
+export function emitMessageRead(payload: { channelId: string; userId: string; readUpToId: string }): void {
+  io?.to(`channel:${payload.channelId}`).emit("message:read", payload);
 }
 
 export function emitNotification(userId: string, notification: Notification): void {
@@ -86,4 +99,8 @@ export function emitIntegrityFlag(
   payload: { sessionId: string; userId: string; event: string; count: number },
 ): void {
   io?.to(`assessment:${assessmentId}:live`).emit("integrity:flag", payload);
+}
+
+export function emitPipelineUpdate(jobId: string): void {
+  io?.to(`pipeline:${jobId}`).emit("pipeline:update");
 }
