@@ -1,17 +1,59 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import createCache from "@emotion/cache";
 import { CacheProvider } from "@emotion/react";
 import { useServerInsertedHTML } from "next/navigation";
-import { ThemeProvider } from "@mui/material/styles";
+import { ThemeProvider, type PaletteMode } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
-import { theme } from "@/lib/theme";
+import { getTheme } from "@/lib/theme";
+
+const THEME_COOKIE = "trafy-theme";
+const THEME_COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year
+
+const ThemeModeContext = createContext<{ mode: PaletteMode; toggleMode: () => void } | null>(null);
+
+export function useThemeMode() {
+  const ctx = useContext(ThemeModeContext);
+  if (!ctx) throw new Error("useThemeMode must be used within ThemeRegistry");
+  return ctx;
+}
+
+function applyMode(mode: PaletteMode) {
+  document.documentElement.dataset.theme = mode;
+  document.cookie = `${THEME_COOKIE}=${mode}; Max-Age=${THEME_COOKIE_MAX_AGE}; Path=/; SameSite=Lax`;
+}
 
 // Standard MUI + Next.js App Router integration: a single emotion cache per
 // request, with styles flushed into the initial HTML response so there's no
 // flash-of-unstyled-content on first paint.
-export function ThemeRegistry({ children }: { children: ReactNode }) {
+export function ThemeRegistry({
+  children,
+  initialMode,
+  hasStoredPreference,
+}: {
+  children: ReactNode;
+  initialMode: PaletteMode;
+  hasStoredPreference: boolean;
+}) {
+  const [mode, setMode] = useState<PaletteMode>(initialMode);
+
+  useEffect(() => {
+    // Only when no cookie exists yet: sync to OS preference once, so a
+    // first-time visitor whose system prefers light doesn't get stuck in the
+    // server-rendered dark default. This is a one-time, accepted flash — every
+    // subsequent load already has the cookie and renders correctly server-side.
+    if (hasStoredPreference) return;
+    const prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
+    if (prefersLight) {
+      setMode("light");
+      applyMode("light");
+    } else {
+      applyMode("dark");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [{ cache, flush }] = useState(() => {
     const cache = createCache({ key: "mui" });
     cache.compat = true;
@@ -48,12 +90,22 @@ export function ThemeRegistry({ children }: { children: ReactNode }) {
     );
   });
 
+  const theme = useMemo(() => getTheme(mode), [mode]);
+
+  const toggleMode = () => {
+    const next: PaletteMode = mode === "light" ? "dark" : "light";
+    setMode(next);
+    applyMode(next);
+  };
+
   return (
     <CacheProvider value={cache}>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        {children}
-      </ThemeProvider>
+      <ThemeModeContext.Provider value={{ mode, toggleMode }}>
+        <ThemeProvider theme={theme}>
+          <CssBaseline />
+          {children}
+        </ThemeProvider>
+      </ThemeModeContext.Provider>
     </CacheProvider>
   );
 }

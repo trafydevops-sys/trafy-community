@@ -1,64 +1,129 @@
 :root {
-  --ink: #16102a;
-  --muted: #5d5a6e;
-  --line: #dcddd2;
-  --bg: #f6f7f1;
-  --panel: #ffffff;
+  --ink: #f8fafc;
+  --muted: #94a3b8;
+  --line: rgba(255, 255, 255, 0.08);
+  --bg: #070a11;
+  --panel: rgba(15, 22, 37, 0.75);
   --accent: #c6ff33;
-  --accent-ink: #1a2400;
-  --accent-strong: #55700a;
-  --danger: #b3261e;
-  --danger-bg: #fdecea;
+  --accent-ink: #070a11;
+  --accent-strong: #d4ff59;
+  --accent-blue: #38bdf8;
+  --danger: #f87171;
+  --danger-bg: rgba(239, 68, 68, 0.1);
+  --font-inter: "Inter", system-ui, sans-serif;
+  --font-outfit: "Outfit", system-ui, sans-serif;
+}
+
+/* Same brand hues as dark mode — only surface luminance, text color, and
+   glow intensity change. --accent-blue and --danger are the exceptions:
+   used directly as text color below (`a`, `.error-banner`), so they need
+   darker variants here to keep AA contrast against a light background. */
+html[data-theme="light"] {
+  --ink: #0f172a;
+  --muted: #475569;
+  --line: rgba(15, 23, 42, 0.08);
+  --bg: #eef1f7;
+  --panel: rgba(255, 255, 255, 0.7);
+  --accent: #c6ff33;
+  --accent-ink: #0f172a;
+  --accent-strong: #8bb022;
+  --accent-blue: #0284c7;
+  --danger: #dc2626;
+  --danger-bg: rgba(239, 68, 68, 0.08);
 }
 
 * {
   box-sizing: border-box;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 html,
 body {
   padding: 0;
   margin: 0;
+  background-color: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-inter);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
-body {
-  background: var(--bg);
-  color: var(--ink);
-  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
-  line-height: 1.5;
+/* Custom Sleek Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(7, 10, 17, 0.8);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+html[data-theme="light"] ::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.05);
+}
+html[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.15);
 }
 
 a {
-  color: var(--accent-strong);
+  color: var(--accent-blue);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+a:hover {
+  color: var(--accent);
 }
 
 .shell {
-  max-width: 480px;
+  max-width: 520px;
   margin: 0 auto;
   padding: 56px 20px 80px;
 }
 
 .shell.wide {
-  max-width: 720px;
+  max-width: 800px;
 }
 
 .brand {
+  font-family: var(--font-outfit);
   font-weight: 700;
-  font-size: 22px;
-  letter-spacing: -0.01em;
+  font-size: 24px;
+  letter-spacing: -0.02em;
   margin-bottom: 6px;
+  color: var(--ink);
 }
 
 .subtitle {
   color: var(--muted);
   margin: 0 0 32px;
+  font-size: 15px;
 }
 
+/* Glassmorphic & Skeuomorphic Card Styles */
 .card {
   background: var(--panel);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 16px;
   padding: 28px;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s ease;
+}
+
+.card:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
 }
 
 .field {
@@ -70,26 +135,31 @@ a {
   font-size: 13px;
   font-weight: 600;
   margin-bottom: 6px;
+  color: var(--ink);
 }
 
 .field input,
 .field textarea,
 .field select {
   width: 100%;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 15px;
   font-family: inherit;
-  background: white;
+  background: rgba(255, 255, 255, 0.04);
   color: var(--ink);
+  backdrop-filter: blur(8px);
+  transition: all 0.2s ease;
 }
 
 .field input:focus,
 .field textarea:focus,
 .field select:focus {
-  outline: 2px solid var(--accent-strong);
-  outline-offset: 1px;
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 16px rgba(198, 255, 51, 0.15);
+  background: rgba(255, 255, 255, 0.07);
 }
 
 .hint {
@@ -100,30 +170,49 @@ a {
 
 button.primary {
   width: 100%;
-  padding: 11px 16px;
-  border-radius: 8px;
+  padding: 12px 18px;
+  border-radius: 10px;
   border: none;
   background: var(--accent);
   color: var(--accent-ink);
+  font-family: var(--font-outfit);
   font-weight: 600;
   font-size: 15px;
   cursor: pointer;
+  box-shadow: 0 0 20px rgba(198, 255, 51, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+button.primary:hover {
+  background: var(--accent-strong);
+  box-shadow: 0 0 28px rgba(198, 255, 51, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  transform: translateY(-1px);
 }
 
 button.primary:disabled {
-  opacity: 0.55;
+  opacity: 0.4;
   cursor: default;
+  box-shadow: none;
+  transform: none;
 }
 
 button.secondary {
-  padding: 9px 14px;
-  border-radius: 8px;
+  padding: 10px 16px;
+  border-radius: 10px;
   border: 1px solid var(--line);
-  background: white;
+  background: rgba(255, 255, 255, 0.05);
   color: var(--ink);
+  font-family: var(--font-outfit);
   font-weight: 600;
   font-size: 14px;
   cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: all 0.2s ease;
+}
+
+button.secondary:hover {
+  border-color: var(--accent);
+  background: rgba(198, 255, 51, 0.08);
 }
 
 button.link {
