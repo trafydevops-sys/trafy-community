@@ -6,9 +6,11 @@ build/
 .expo/
 *.tsbuildinfo
 
+docs
 .env
 .env.local
 !.env.example
+graphify-out
 
 apps/api/uploads/*
 !apps/api/uploads/.gitkeep
