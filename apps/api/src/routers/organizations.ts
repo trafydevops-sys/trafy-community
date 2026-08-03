@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, count, eq } from "drizzle-orm";
+import { and, count, desc, eq, isNull } from "drizzle-orm";
 import { schema } from "@trafy-community/db";
 import {
   addOrgMemberInput,
@@ -7,14 +7,20 @@ import {
   getOrganizationInput,
   removeOrgMemberInput,
   updateOrgMemberRoleInput,
+  updateOrganizationInput,
+  getPublicOrgInput,
+  createPostInput, // need this for createPost
   type Organization,
   type OrganizationDetail,
   type OrgMember,
   type OrgRole,
+  type PublicOrg,
+  type Post, // if we use it
 } from "@trafy-community/core";
-import { router, protectedProcedure } from "../lib/trpc.js";
+import { router, protectedProcedure, publicProcedure } from "../lib/trpc.js";
 import { db } from "../lib/db.js";
 import { notify } from "../lib/notify.js";
+// Also need to get jobs and posts stuff, we can just return standard queries or map them
 
 function slugify(name: string): string {
   const base = name
@@ -28,7 +34,6 @@ function slugify(name: string): string {
 async function uniqueSlug(base: string): Promise<string> {
   let slug = base;
   let suffix = 1;
-  // Small orgs, small suffix space — a straightforward retry loop is fine here.
   while (true) {
     const [existing] = await db.select().from(schema.organizations).where(eq(schema.organizations.slug, slug)).limit(1);
     if (!existing) return slug;
@@ -55,21 +60,35 @@ async function assertAdmin(organizationId: string, userId: string) {
   return member;
 }
 
-async function toOrganization(row: typeof schema.organizations.$inferSelect, myRole: OrgRole): Promise<Organization> {
+async function toOrganization(row: typeof schema.organizations.$inferSelect, myRole?: OrgRole): Promise<Organization> {
   const memberRows = await db
     .select({ value: count() })
     .from(schema.organizationMembers)
     .where(eq(schema.organizationMembers.organizationId, row.id));
   const courseRows = await db.select({ value: count() }).from(schema.courses).where(eq(schema.courses.organizationId, row.id));
+  const jobRows = await db.select({ value: count() }).from(schema.jobs).where(eq(schema.jobs.organizationId, row.id));
+  const postRows = await db.select({ value: count() }).from(schema.posts).where(eq(schema.posts.organizationId, row.id));
 
   return {
     id: row.id,
+    type: row.type as "company" | "institution",
     name: row.name,
     slug: row.slug,
     ownerId: row.ownerId,
+    about: row.about,
+    logoUrl: row.logoUrl,
+    bannerUrl: row.bannerUrl,
+    website: row.website,
+    industry: row.industry,
+    employeeRange: row.employeeRange,
+    location: row.location,
+    foundedYear: row.foundedYear,
+    linkedinUrl: row.linkedinUrl,
     myRole,
     memberCount: memberRows[0]?.value ?? 0,
     courseCount: courseRows[0]?.value ?? 0,
+    jobCount: jobRows[0]?.value ?? 0,
+    postCount: postRows[0]?.value ?? 0,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -79,12 +98,34 @@ export const organizationsRouter = router({
     const slug = await uniqueSlug(slugify(input.name));
     const [org] = await db
       .insert(schema.organizations)
-      .values({ name: input.name, slug, ownerId: ctx.user.sub })
+      .values({ name: input.name, slug, ownerId: ctx.user.sub, type: input.type })
       .returning();
     if (!org) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
     await db.insert(schema.organizationMembers).values({ organizationId: org.id, userId: ctx.user.sub, role: "owner" });
     return toOrganization(org, "owner");
+  }),
+
+  update: protectedProcedure.input(updateOrganizationInput).mutation(async ({ ctx, input }) => {
+    await assertAdmin(input.organizationId, ctx.user.sub);
+    const { organizationId, ...updates } = input;
+    const [org] = await db
+      .update(schema.organizations)
+      .set(updates)
+      .where(eq(schema.organizations.id, organizationId))
+      .returning();
+    if (!org) throw new TRPCError({ code: "NOT_FOUND" });
+    const member = await assertMember(organizationId, ctx.user.sub);
+    return toOrganization(org, member.role as OrgRole);
+  }),
+
+  getPublic: publicProcedure.input(getPublicOrgInput).query(async ({ input }) => {
+    const [org] = await db.select().from(schema.organizations).where(eq(schema.organizations.slug, input.slug)).limit(1);
+    if (!org) throw new TRPCError({ code: "NOT_FOUND" });
+    
+    // We omit myRole for public
+    const { myRole, ...publicOrg } = await toOrganization(org);
+    return publicOrg as PublicOrg;
   }),
 
   myOrganizations: protectedProcedure.query(async ({ ctx }) => {
@@ -187,5 +228,53 @@ export const organizationsRouter = router({
       .where(and(eq(schema.organizationMembers.organizationId, input.organizationId), eq(schema.organizationMembers.userId, input.userId)));
 
     return { ok: true as const };
+  }),
+
+  listJobs: publicProcedure.input(getPublicOrgInput).query(async ({ input }) => {
+    const [org] = await db.select().from(schema.organizations).where(eq(schema.organizations.slug, input.slug)).limit(1);
+    if (!org) throw new TRPCError({ code: "NOT_FOUND" });
+
+    // Assuming we want all published jobs for the org, no pagination needed for now or limit 50
+    const rows = await db
+      .select()
+      .from(schema.jobs)
+      .where(and(eq(schema.jobs.organizationId, org.id), eq(schema.jobs.published, true)))
+      .orderBy(desc(schema.jobs.createdAt))
+      .limit(50);
+    
+    // Simplistic mapping, ideally we'd share toSummary with jobsRouter, but we lack userId for public endpoints.
+    // For now we'll just map to the core properties.
+    return rows;
+  }),
+
+  listPosts: publicProcedure.input(getPublicOrgInput).query(async ({ input }) => {
+    const [org] = await db.select().from(schema.organizations).where(eq(schema.organizations.slug, input.slug)).limit(1);
+    if (!org) throw new TRPCError({ code: "NOT_FOUND" });
+
+    const rows = await db
+      .select({ posts: schema.posts })
+      .from(schema.posts)
+      .where(eq(schema.posts.organizationId, org.id))
+      .orderBy(desc(schema.posts.createdAt))
+      .limit(50);
+    
+    // We map to Post type with the org as author
+    return rows.map(r => ({
+      id: r.posts.id,
+      author: { id: org.id, fullName: org.name, avatarUrl: org.logoUrl || undefined, isOrg: true },
+      body: r.posts.body,
+      kind: r.posts.kind as Post["kind"],
+      mediaUrl: r.posts.mediaUrl,
+      linkUrl: r.posts.linkUrl,
+      linkTitle: r.posts.linkTitle,
+      linkImage: r.posts.linkImage,
+      linkDescription: r.posts.linkDescription,
+      createdAt: r.posts.createdAt.toISOString(),
+      reactionCount: 0,
+      reactedByMe: false,
+      commentCount: 0,
+      savedByMe: false,
+      organizationId: org.id,
+    }));
   }),
 });
