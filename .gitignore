@@ -5,12 +5,13 @@ build/
 .turbo/
 .expo/
 *.tsbuildinfo
-
+.superpowers
 docs
 .env
 .env.local
 !.env.example
 graphify-out
+commit_changes.ps1
 
 apps/api/uploads/*
 !apps/api/uploads/.gitkeep
