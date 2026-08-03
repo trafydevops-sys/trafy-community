@@ -64,7 +64,7 @@ export default function DiscoverPage() {
   }
 
   return (
-    <AppShell active="discover">
+    <AppShell active="network">
       <Typography variant="h4" gutterBottom>
         Discover
       </Typography>
