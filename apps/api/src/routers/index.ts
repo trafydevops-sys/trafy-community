@@ -23,6 +23,7 @@ import { analyticsRouter } from "./analytics.js";
 import { batchesRouter } from "./batches.js";
 import { connectionsRouter } from "./connections.js";
 import { buildMissionsRouter } from "./build-missions.js";
+import { newsRouter } from "./news.js";
 
 export const appRouter = router({
   auth: authRouter,
@@ -49,6 +50,7 @@ export const appRouter = router({
   batches: batchesRouter,
   connections: connectionsRouter,
   buildMissions: buildMissionsRouter,
+  news: newsRouter,
 });
 
 export type AppRouter = typeof appRouter;

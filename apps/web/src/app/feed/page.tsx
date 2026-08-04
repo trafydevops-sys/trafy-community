@@ -23,6 +23,9 @@ import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
 import DialogActions from "@mui/material/DialogActions";
+import Grid from "@mui/material/Grid";
+import Container from "@mui/material/Container";
+import Avatar from "@mui/material/Avatar";
 import FavoriteIcon from "@mui/icons-material/Favorite";
 import FavoriteBorderIcon from "@mui/icons-material/FavoriteBorder";
 import CommentIcon from "@mui/icons-material/ChatBubbleOutlined";
@@ -35,6 +38,7 @@ import LinkIcon from "@mui/icons-material/LinkOutlined";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdfOutlined";
 import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
 import { AppShell } from "@/components/app-shell";
+import { useAuth } from "@/lib/auth-context";
 import { withAuthRetry, trpc } from "@/lib/trpc-client";
 import { uploadFile } from "@/lib/upload";
 
@@ -584,10 +588,14 @@ function PostComposer({ onCreated }: { onCreated: (post: Post) => void }) {
 // Feed Page
 // ──────────────────────────────────────────────────────────────────────────────
 export default function FeedPage() {
+  const { user } = useAuth();
   const [scope, setScope] = useState<"everyone" | "following">("everyone");
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [news, setNews] = useState<any[]>([]);
+  const [newsLoading, setNewsLoading] = useState(true);
 
   async function loadFeed(currentScope: typeof scope) {
     setLoading(true);
@@ -604,6 +612,11 @@ export default function FeedPage() {
 
   useEffect(() => {
     loadFeed(scope);
+    
+    withAuthRetry(() => (trpc as any).news.getTopStories.query())
+      .then((data) => setNews(data as any[]))
+      .catch(() => {})
+      .finally(() => setNewsLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope]);
 
@@ -613,41 +626,95 @@ export default function FeedPage() {
 
   return (
     <AppShell active="feed">
-      <Typography variant="h4" gutterBottom>Home Feed</Typography>
-      <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-        See what your community is building and discussing.
-      </Typography>
+      <Container maxWidth="lg" sx={{ pt: 3, pb: 6 }}>
+        <Grid container spacing={3} sx={{ justifyContent: "center" }}>
+          
+          {/* Left Column: Identity */}
+          <Grid size={{ xs: 12, md: 3 }} sx={{ display: { xs: "none", md: "block" } }}>
+            <Paper sx={{ p: 0, overflow: "hidden", textAlign: "center", mb: 2 }}>
+              <Box sx={{ height: 60, bgcolor: "rgba(10, 102, 194, 0.2)", mb: "-30px" }} />
+              <Avatar sx={{ width: 64, height: 64, mx: "auto", border: "2px solid #fff", bgcolor: "primary.main", fontSize: 24, fontWeight: "bold" }}>
+                {user?.email?.charAt(0).toUpperCase()}
+              </Avatar>
+              <Box sx={{ p: 2, pt: 1 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: "bold", cursor: "pointer", "&:hover": { textDecoration: "underline", color: "primary.main" } }}>
+                  {user?.email?.split("@")[0] || "Member"}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  Software Engineer
+                </Typography>
+                <Divider sx={{ my: 1.5 }} />
+                <Box sx={{ display: "flex", justifyContent: "space-between", cursor: "pointer", "&:hover": { bgcolor: "rgba(0,0,0,0.04)" }, p: 0.5, borderRadius: 1 }}>
+                  <Typography variant="body2" color="text.secondary">Profile viewers</Typography>
+                  <Typography variant="body2" color="primary" sx={{ fontWeight: "bold" }}>128</Typography>
+                </Box>
+                <Box sx={{ display: "flex", justifyContent: "space-between", mt: 0.5, cursor: "pointer", "&:hover": { bgcolor: "rgba(0,0,0,0.04)" }, p: 0.5, borderRadius: 1 }}>
+                  <Typography variant="body2" color="text.secondary">Post impressions</Typography>
+                  <Typography variant="body2" color="primary" sx={{ fontWeight: "bold" }}>342</Typography>
+                </Box>
+              </Box>
+            </Paper>
+          </Grid>
+          
+          {/* Center Column: Feed */}
+          <Grid size={{ xs: 12, md: 6 }}>
+            <PostComposer onCreated={(post) => setPosts((curr) => [post, ...curr])} />
 
-      <PostComposer onCreated={(post) => setPosts((curr) => [post, ...curr])} />
+            <Box sx={{ display: "flex", alignItems: "center", mb: 2 }}>
+              <Divider sx={{ flexGrow: 1 }} />
+              <Typography variant="caption" color="text.secondary" sx={{ mx: 2 }}>
+                Sort by: <strong>Top</strong>
+              </Typography>
+            </Box>
 
-      <ToggleButtonGroup
-        value={scope}
-        exclusive
-        onChange={(_, value) => value && setScope(value)}
-        size="small"
-        sx={{ mb: 2.5 }}
-      >
-        <ToggleButton value="everyone">Everyone</ToggleButton>
-        <ToggleButton value="following">Following</ToggleButton>
-      </ToggleButtonGroup>
+            {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+            {loading ? (
+              <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}><CircularProgress /></Box>
+            ) : posts.length === 0 ? (
+              <Typography color="text.secondary" sx={{ textAlign: "center", py: 4 }}>
+                No posts yet — share the first update with your community.
+              </Typography>
+            ) : (
+              <Stack spacing={2}>
+                {posts.map((post) => (
+                  <PostCard key={post.id} post={post} onUpdate={handleUpdate} />
+                ))}
+              </Stack>
+            )}
+          </Grid>
 
-      {loading ? (
-        <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}><CircularProgress /></Box>
-      ) : posts.length === 0 ? (
-        <Typography color="text.secondary">
-          {scope === "following"
-            ? "Follow people on Discover to see their posts here."
-            : "No posts yet — share the first update with your community."}
-        </Typography>
-      ) : (
-        <Stack spacing={2}>
-          {posts.map((post) => (
-            <PostCard key={post.id} post={post} onUpdate={handleUpdate} />
-          ))}
-        </Stack>
-      )}
+          {/* Right Column: News */}
+          <Grid size={{ xs: 12, md: 3 }} sx={{ display: { xs: "none", lg: "block" } }}>
+            <Paper sx={{ p: 2 }}>
+              <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: "bold" }}>
+                Trafy News
+              </Typography>
+              <Typography variant="caption" color="text.secondary" gutterBottom sx={{ display: "block" }}>
+                Top stories
+              </Typography>
+              
+              {newsLoading ? (
+                <CircularProgress size={20} sx={{ mt: 2 }} />
+              ) : (
+                <Stack spacing={1.5} sx={{ mt: 1 }}>
+                  {news.map((item: any) => (
+                    <Box key={item.id}>
+                      <Typography variant="body2" sx={{ fontWeight: "bold", cursor: "pointer", "&:hover": { color: "primary.main", textDecoration: "underline" }, lineHeight: 1.2, mb: 0.25 }}>
+                        {item.title}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {item.timeAgo} • {item.readers} readers
+                      </Typography>
+                    </Box>
+                  ))}
+                </Stack>
+              )}
+            </Paper>
+          </Grid>
+
+        </Grid>
+      </Container>
     </AppShell>
   );
 }
