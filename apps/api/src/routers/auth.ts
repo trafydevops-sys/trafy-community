@@ -15,7 +15,7 @@ import { checkRequestRateLimit, generateOtpCode, storeOtpCode, verifyAndConsumeO
 import { sendOtpEmail } from "../lib/mail.js";
 import { consumeRefreshToken, issueRefreshToken, revokeRefreshToken, signAccessToken } from "../lib/tokens.js";
 import { usingEmailStub, env } from "../lib/env.js";
-import { exchangeGoogleCode, exchangeLinkedinCode } from "../lib/oauth.js";
+import { exchangeGoogleCode, exchangeLinkedinCode, exchangeGithubCode } from "../lib/oauth.js";
 
 async function findOrCreateUser(email: string) {
   const [existing] = await db.select().from(schema.users).where(eq(schema.users.email, email)).limit(1);
@@ -71,6 +71,8 @@ export const authRouter = router({
         email = await exchangeGoogleCode(input.code, input.redirectUri);
       } else if (input.provider === "linkedin") {
         email = await exchangeLinkedinCode(input.code, input.redirectUri);
+      } else if (input.provider === "github") {
+        email = await exchangeGithubCode(input.code, input.redirectUri);
       } else {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Unsupported provider" });
       }
@@ -87,6 +89,7 @@ export const authRouter = router({
     return {
       googleClientId: env.GOOGLE_CLIENT_ID || null,
       linkedinClientId: env.LINKEDIN_CLIENT_ID || null,
+      githubClientId: env.GITHUB_CLIENT_ID || null,
     };
   }),
 

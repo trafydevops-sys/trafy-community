@@ -26,7 +26,7 @@ export function OtpAuthForm({ heading, subheading }: { heading: string; subheadi
   const [devCode, setDevCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [oauthConfig, setOauthConfig] = useState<{ googleClientId: string | null; linkedinClientId: string | null } | null>(null);
+  const [oauthConfig, setOauthConfig] = useState<{ googleClientId: string | null; linkedinClientId: string | null; githubClientId: string | null } | null>(null);
 
   useEffect(() => {
     trpc.auth.oauthConfig.query().then(setOauthConfig).catch(console.error);
@@ -84,7 +84,7 @@ export function OtpAuthForm({ heading, subheading }: { heading: string; subheadi
 
           {step === "email" ? (
             <Stack component="form" onSubmit={handleRequestOtp} spacing={2}>
-              {oauthConfig && (oauthConfig.googleClientId || oauthConfig.linkedinClientId) && (
+              {oauthConfig && (oauthConfig.googleClientId || oauthConfig.linkedinClientId || oauthConfig.githubClientId) && (
                 <>
                   {oauthConfig.googleClientId && (
                     <Button 
@@ -108,6 +108,18 @@ export function OtpAuthForm({ heading, subheading }: { heading: string; subheadi
                       }}
                     >
                       Continue with LinkedIn
+                    </Button>
+                  )}
+                  {oauthConfig.githubClientId && (
+                    <Button 
+                      variant="outlined" 
+                      fullWidth 
+                      size="large" 
+                      onClick={() => {
+                        window.location.href = `https://github.com/login/oauth/authorize?client_id=${oauthConfig.githubClientId}&redirect_uri=${window.location.origin}/auth/callback&scope=user:email&state=github`;
+                      }}
+                    >
+                      Continue with GitHub
                     </Button>
                   )}
                   <Divider sx={{ my: 1, color: "text.secondary", fontSize: "0.875rem" }}>or</Divider>

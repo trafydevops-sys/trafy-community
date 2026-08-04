@@ -20,7 +20,7 @@ export const verifyOtpInput = z.object({
 export type VerifyOtpInput = z.infer<typeof verifyOtpInput>;
 
 export const oauthCallbackInput = z.object({
-  provider: z.enum(["google", "linkedin"]),
+  provider: z.enum(["google", "linkedin", "github"]),
   code: z.string().min(1),
   redirectUri: z.string().url(),
 });
