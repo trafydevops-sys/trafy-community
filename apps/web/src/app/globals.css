@@ -1,35 +1,21 @@
 :root {
-  --ink: #f8fafc;
-  --muted: #94a3b8;
-  --line: rgba(255, 255, 255, 0.08);
-  --bg: #070a11;
-  --panel: rgba(15, 22, 37, 0.75);
-  --accent: #c6ff33;
-  --accent-ink: #070a11;
-  --accent-strong: #d4ff59;
-  --accent-blue: #38bdf8;
-  --danger: #f87171;
-  --danger-bg: rgba(239, 68, 68, 0.1);
-  --font-inter: "Inter", system-ui, sans-serif;
-  --font-outfit: "Outfit", system-ui, sans-serif;
+  --ink: rgba(0,0,0,0.9);
+  --muted: rgba(0,0,0,0.6);
+  --line: rgba(0,0,0,0.08);
+  --bg: #f3f2ef;
+  --panel: #ffffff;
+  --accent: #0a66c2;
+  --accent-ink: #ffffff;
+  --accent-strong: #004182;
+  --accent-blue: #0a66c2;
+  --danger: #d11124;
+  --danger-bg: rgba(209, 17, 36, 0.1);
+  --font-inter: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Fira Sans", Ubuntu, Oxygen, "Oxygen Sans", Cantarell, "Droid Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Lucida Grande", Helvetica, Arial, sans-serif;
+  --font-outfit: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Fira Sans", Ubuntu, Oxygen, "Oxygen Sans", Cantarell, "Droid Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Lucida Grande", Helvetica, Arial, sans-serif;
 }
 
-/* Same brand hues as dark mode — only surface luminance, text color, and
-   glow intensity change. --accent-blue and --danger are the exceptions:
-   used directly as text color below (`a`, `.error-banner`), so they need
-   darker variants here to keep AA contrast against a light background. */
 html[data-theme="light"] {
-  --ink: #0f172a;
-  --muted: #475569;
-  --line: rgba(15, 23, 42, 0.08);
-  --bg: #eef1f7;
-  --panel: rgba(255, 255, 255, 0.7);
-  --accent: #c6ff33;
-  --accent-ink: #0f172a;
-  --accent-strong: #8bb022;
-  --accent-blue: #0284c7;
-  --danger: #dc2626;
-  --danger-bg: rgba(239, 68, 68, 0.08);
+  /* Fallback to root for simplicity */
 }
 
 * {

@@ -21,43 +21,32 @@ declare module "@mui/material/styles" {
   }
 }
 
-// Same brand hues in both modes (lime CTA, cyber blue, etc.) — only surface
-// luminance, text color, and glow/shadow intensity change between light and
-// dark. `--accent-blue` and danger red are the exceptions: used as literal
-// text color in globals.css, so they need darker variants in light mode to
-// keep AA contrast against a light background.
+// LinkedIn inspired light mode UI theme
 const SURFACES = {
-  dark: {
-    default: "#070a11", // Deep Obsidian Background
-    paper: "rgba(15, 22, 37, 0.75)", // Frosted Glass Paper Surface
-    textPrimary: "#f8fafc",
-    textSecondary: "#94a3b8",
-    divider: "rgba(255, 255, 255, 0.08)",
-    contrastText: "#070a11",
-  },
   light: {
-    default: "#eef1f7", // Soft slate — pure white reads flat behind glass blur
-    paper: "rgba(255, 255, 255, 0.7)",
-    textPrimary: "#0f172a",
-    textSecondary: "#475569",
-    divider: "rgba(15, 23, 42, 0.08)",
-    contrastText: "#0f172a",
+    default: "#f3f2ef", // LinkedIn warm gray
+    paper: "#ffffff",
+    textPrimary: "rgba(0,0,0,0.9)",
+    textSecondary: "rgba(0,0,0,0.6)",
+    divider: "rgba(0, 0, 0, 0.08)",
+    contrastText: "#ffffff",
   },
 } as const;
 
 export function getTheme(mode: PaletteMode) {
-  const s = mode === "light" ? SURFACES.light : SURFACES.dark;
-  const isLight = mode === "light";
-
+  // Force light mode for LinkedIn style, ignoring 'mode' parameter for now 
+  // to ensure consistent corporate look
+  const s = SURFACES.light;
+  
   return createTheme({
     palette: {
-      mode,
+      mode: "light",
       primary: {
-        main: "#c6ff33", // Electric Lime CTA
+        main: "#0a66c2", // LinkedIn blue
         contrastText: s.contrastText,
       },
       secondary: {
-        main: "#38bdf8", // Cyber Blue
+        main: "#000000", 
         contrastText: s.contrastText,
       },
       background: {
@@ -70,42 +59,35 @@ export function getTheme(mode: PaletteMode) {
       },
       divider: s.divider,
       accent: {
-        lime: "#c6ff33",
-        blue: "#38bdf8",
-        green: "#34d399",
-        amber: "#fbbf24",
+        lime: "#0a66c2", // Map all accents to appropriate corporate colors or keep standard
+        blue: "#0a66c2",
+        green: "#057642", // LinkedIn green for success/active
+        amber: "#f8c77e", // LinkedIn premium gold
         purple: "#818cf8",
       },
     },
     typography: {
-      fontFamily: "var(--font-inter), Inter, system-ui, sans-serif",
-      h1: { fontFamily: "var(--font-outfit), Outfit, sans-serif", fontWeight: 700, letterSpacing: "-0.02em" },
-      h2: { fontFamily: "var(--font-outfit), Outfit, sans-serif", fontWeight: 700, letterSpacing: "-0.02em" },
-      h3: { fontFamily: "var(--font-outfit), Outfit, sans-serif", fontWeight: 600, letterSpacing: "-0.01em" },
-      h4: { fontFamily: "var(--font-outfit), Outfit, sans-serif", fontWeight: 600 },
-      h5: { fontFamily: "var(--font-outfit), Outfit, sans-serif", fontWeight: 600 },
-      h6: { fontFamily: "var(--font-outfit), Outfit, sans-serif", fontWeight: 600 },
-      subtitle1: { fontFamily: "var(--font-outfit), Outfit, sans-serif", fontWeight: 500 },
-      subtitle2: { fontFamily: "var(--font-outfit), Outfit, sans-serif", fontWeight: 500 },
-      button: { fontFamily: "var(--font-outfit), Outfit, sans-serif", fontWeight: 600, textTransform: "none" },
+      fontFamily: '-apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Fira Sans", Ubuntu, Oxygen, "Oxygen Sans", Cantarell, "Droid Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Lucida Grande", Helvetica, Arial, sans-serif',
+      h1: { fontWeight: 600, letterSpacing: "-0.02em" },
+      h2: { fontWeight: 600, letterSpacing: "-0.01em" },
+      h3: { fontWeight: 600 },
+      h4: { fontWeight: 600 },
+      h5: { fontWeight: 600 },
+      h6: { fontWeight: 600 },
+      subtitle1: { fontWeight: 500 },
+      subtitle2: { fontWeight: 500 },
+      button: { fontWeight: 600, textTransform: "none" },
+      body1: { fontSize: "0.875rem" },
+      body2: { fontSize: "0.875rem" },
     },
     shape: {
-      borderRadius: 14,
+      borderRadius: 8,
     },
     components: {
       MuiCssBaseline: {
         styleOverrides: {
           body: {
             backgroundColor: s.default,
-            backgroundImage: isLight
-              ? `
-                radial-gradient(circle at 15% 15%, rgba(198, 255, 51, 0.08) 0%, transparent 40%),
-                radial-gradient(circle at 85% 85%, rgba(56, 189, 248, 0.08) 0%, transparent 40%)
-              `
-              : `
-                radial-gradient(circle at 15% 15%, rgba(198, 255, 51, 0.05) 0%, transparent 40%),
-                radial-gradient(circle at 85% 85%, rgba(56, 189, 248, 0.05) 0%, transparent 40%)
-              `,
             backgroundAttachment: "fixed",
             color: s.textPrimary,
           },
@@ -117,45 +99,42 @@ export function getTheme(mode: PaletteMode) {
           root: {
             backgroundImage: "none",
             backgroundColor: s.paper,
-            backdropFilter: "blur(16px)",
+            backdropFilter: "none",
             border: `1px solid ${s.divider}`,
-            boxShadow: isLight
-              ? "0 8px 32px 0 rgba(15, 23, 42, 0.08), inset 0 1px 0 0 rgba(255, 255, 255, 0.6)"
-              : "0 8px 32px 0 rgba(0, 0, 0, 0.4)",
-            borderRadius: 14,
+            boxShadow: "0 0 0 1px rgba(0,0,0,0.08)",
+            borderRadius: 8,
           },
         },
       },
       MuiButton: {
         styleOverrides: {
           root: {
-            borderRadius: 12,
+            borderRadius: 24, // Pill shape
             fontWeight: 600,
             transition: "all 0.25s cubic-bezier(0.16, 1, 0.3, 1)",
             textTransform: "none",
+            boxShadow: "none",
           },
           contained: {
-            backgroundColor: "#c6ff33",
-            color: s.contrastText,
-            boxShadow: isLight
-              ? "0 4px 16px rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.5)"
-              : "0 0 20px rgba(198, 255, 51, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.4)",
+            backgroundColor: "#0a66c2",
+            color: "#ffffff",
+            boxShadow: "none",
             "&:hover": {
-              backgroundColor: isLight ? "#b8f014" : "#d4ff59",
-              boxShadow: isLight
-                ? "0 6px 20px rgba(15, 23, 42, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.6)"
-                : "0 0 28px rgba(198, 255, 51, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.6)",
-              transform: "translateY(-1px)",
+              backgroundColor: "#004182",
+              boxShadow: "none",
+              transform: "none",
             },
           },
           outlined: {
-            borderColor: isLight ? "rgba(15, 23, 42, 0.15)" : "rgba(255, 255, 255, 0.15)",
-            color: s.textPrimary,
-            backdropFilter: "blur(8px)",
+            borderColor: "#0a66c2",
+            color: "#0a66c2",
+            backdropFilter: "none",
+            borderWidth: 1,
             "&:hover": {
-              borderColor: "#c6ff33",
-              backgroundColor: isLight ? "rgba(198, 255, 51, 0.15)" : "rgba(198, 255, 51, 0.08)",
-              boxShadow: isLight ? "none" : "0 0 16px rgba(198, 255, 51, 0.15)",
+              borderColor: "#0a66c2",
+              borderWidth: 2,
+              backgroundColor: "rgba(10, 102, 194, 0.08)",
+              boxShadow: "none",
             },
           },
         },
@@ -163,16 +142,17 @@ export function getTheme(mode: PaletteMode) {
       MuiListItemButton: {
         styleOverrides: {
           root: {
-            borderRadius: 10,
-            transition: "all 0.2s ease-in-out",
+            borderRadius: 0,
+            transition: "none",
             "&:hover": {
-              backgroundColor: isLight ? "rgba(15, 23, 42, 0.05)" : "rgba(255, 255, 255, 0.05)",
+              backgroundColor: "rgba(0, 0, 0, 0.08)",
             },
             "&.Mui-selected": {
-              backgroundColor: isLight ? "rgba(198, 255, 51, 0.18)" : "rgba(198, 255, 51, 0.12)",
-              borderLeft: "3px solid #c6ff33",
+              backgroundColor: "transparent",
+              borderLeft: "3px solid #0a66c2",
+              color: "#0a66c2",
               "&:hover": {
-                backgroundColor: isLight ? "rgba(198, 255, 51, 0.26)" : "rgba(198, 255, 51, 0.18)",
+                backgroundColor: "rgba(0, 0, 0, 0.08)",
               },
             },
           },
@@ -182,18 +162,19 @@ export function getTheme(mode: PaletteMode) {
         defaultProps: { elevation: 0 },
         styleOverrides: {
           root: {
-            backgroundColor: isLight ? "rgba(255, 255, 255, 0.75)" : "rgba(7, 10, 17, 0.8)",
-            backdropFilter: "blur(20px)",
-            borderBottom: `1px solid ${s.divider}`,
+            backgroundColor: "#ffffff",
+            borderBottom: "1px solid rgba(0,0,0,0.08)",
+            color: "rgba(0,0,0,0.6)",
+            backdropFilter: "none",
           },
         },
       },
       MuiDrawer: {
         styleOverrides: {
           paper: {
-            backgroundColor: isLight ? "rgba(255, 255, 255, 0.85)" : "rgba(11, 16, 27, 0.95)",
-            backdropFilter: "blur(24px)",
-            borderRight: `1px solid ${s.divider}`,
+            backgroundColor: "#ffffff",
+            backdropFilter: "none",
+            borderRight: "1px solid rgba(0,0,0,0.08)",
           },
         },
       },
