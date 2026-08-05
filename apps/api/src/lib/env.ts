@@ -14,7 +14,23 @@ const envSchema = z.object({
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().default(30),
   OTP_TTL_SECONDS: z.coerce.number().default(300),
   RESEND_API_KEY: z.string().optional(),
+  // S3-compatible object storage (AWS S3, Cloudflare R2, DigitalOcean Spaces,
+  // Backblaze B2, self-hosted MinIO, ...) — see lib/storage.ts.
   S3_ENDPOINT: z.string().optional(),
+  S3_BUCKET: z.string().optional(),
+  S3_ACCESS_KEY_ID: z.string().optional(),
+  S3_SECRET_ACCESS_KEY: z.string().optional(),
+  S3_REGION: z.string().default("auto"),
+  // Most S3-compatible providers (R2, MinIO, Spaces) serve files back through
+  // a URL that differs from the API endpoint used to write them (a public
+  // bucket subdomain, or a CDN in front of the bucket). Falls back to
+  // path-style off the endpoint itself when unset — correct for AWS S3, not
+  // for providers that require a separate public host.
+  S3_PUBLIC_URL: z.string().optional(),
+  // MinIO and most non-AWS providers require path-style addressing
+  // (endpoint/bucket/key) rather than AWS's virtual-hosted style
+  // (bucket.endpoint/key).
+  S3_FORCE_PATH_STYLE: z.coerce.boolean().default(true),
   JUDGE0_URL: z.string().optional(),
   LIVEKIT_URL: z.string().optional(),
   LIVEKIT_API_KEY: z.string().optional(),
@@ -31,6 +47,13 @@ const envSchema = z.object({
   GEMINI_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   DEEPGRAM_API_KEY: z.string().optional(),
+  // Sentry itself is initialized in instrument.ts (must load before every
+  // other module) — SENTRY_DSN is read there directly from process.env, not
+  // through this schema. It's listed here only so `usingSentry` below can
+  // read the same value everyone else's env access goes through.
+  SENTRY_DSN: z.string().optional(),
+  POSTHOG_API_KEY: z.string().optional(),
+  POSTHOG_HOST: z.string().default("https://us.i.posthog.com"),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -47,3 +70,5 @@ export const usingEmailStub = !env.RESEND_API_KEY;
 export const usingLocalStorage = !env.S3_ENDPOINT;
 export const usingCodeGradingStub = !env.JUDGE0_URL;
 export const liveKitConfigured = Boolean(env.LIVEKIT_URL && env.LIVEKIT_API_KEY && env.LIVEKIT_API_SECRET);
+export const usingSentry = Boolean(env.SENTRY_DSN);
+export const usingPostHog = Boolean(env.POSTHOG_API_KEY);
