@@ -25,6 +25,30 @@ export async function verifyAccessToken(token: string): Promise<AccessTokenPaylo
   return { sub: payload.sub, email: payload.email, type: "access" };
 }
 
+/**
+ * Proves "the email OTP step already succeeded for this user" without yet
+ * granting a session — issued by verifyOtp when the account has TOTP
+ * enabled, and redeemed by verifyTotpChallenge. Deliberately short-lived and
+ * a distinct `type` so it can never be mistaken for (or reused as) a real
+ * access token.
+ */
+export async function signTotpChallengeToken(userId: string, email: string): Promise<string> {
+  return new SignJWT({ email, type: "totp_challenge" })
+    .setProtectedHeader({ alg: "HS256" })
+    .setSubject(userId)
+    .setIssuedAt()
+    .setExpirationTime("5m")
+    .sign(accessSecret);
+}
+
+export async function verifyTotpChallengeToken(token: string): Promise<{ sub: string; email: string }> {
+  const { payload } = await jwtVerify(token, accessSecret);
+  if (payload.type !== "totp_challenge" || typeof payload.sub !== "string" || typeof payload.email !== "string") {
+    throw new Error("Not a valid TOTP challenge token");
+  }
+  return { sub: payload.sub, email: payload.email };
+}
+
 function hashSecret(secret: string): string {
   return createHash("sha256").update(secret).digest("hex");
 }

@@ -14,7 +14,7 @@ import Divider from "@mui/material/Divider";
 import { trpc } from "@/lib/trpc-client";
 import { useAuth } from "@/lib/auth-context";
 
-type Step = "email" | "code";
+type Step = "email" | "code" | "totp";
 
 export function OtpAuthForm({ heading, subheading }: { heading: string; subheading: string }) {
   const router = useRouter();
@@ -26,6 +26,8 @@ export function OtpAuthForm({ heading, subheading }: { heading: string; subheadi
   const [devCode, setDevCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [challengeToken, setChallengeToken] = useState<string | null>(null);
+  const [totpCode, setTotpCode] = useState("");
   const [oauthConfig, setOauthConfig] = useState<{ googleClientId: string | null; linkedinClientId: string | null; githubClientId: string | null } | null>(null);
 
   useEffect(() => {
@@ -47,16 +49,40 @@ export function OtpAuthForm({ heading, subheading }: { heading: string; subheadi
     }
   }
 
+  async function afterLogin() {
+    const { profile } = await trpc.profile.get.query().catch(() => ({ profile: null }));
+    router.push(profile?.fullName ? "/feed" : "/onboarding");
+  }
+
   async function handleVerifyOtp(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      const tokens = await trpc.auth.verifyOtp.mutate({ email, code });
-      login(tokens);
+      const result = await trpc.auth.verifyOtp.mutate({ email, code });
+      if (result.totpRequired) {
+        setChallengeToken(result.challengeToken);
+        setStep("totp");
+        return;
+      }
+      login(result);
+      await afterLogin();
+    } catch (err) {
+      setError(err instanceof TRPCClientError ? err.message : "That code is incorrect or has expired.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
-      const { profile } = await trpc.profile.get.query().catch(() => ({ profile: null }));
-      router.push(profile?.fullName ? "/feed" : "/onboarding");
+  async function handleVerifyTotp(e: FormEvent) {
+    e.preventDefault();
+    if (!challengeToken) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const tokens = await trpc.auth.verifyTotpChallenge.mutate({ challengeToken, code: totpCode });
+      login(tokens);
+      await afterLogin();
     } catch (err) {
       setError(err instanceof TRPCClientError ? err.message : "That code is incorrect or has expired.");
     } finally {
@@ -82,7 +108,39 @@ export function OtpAuthForm({ heading, subheading }: { heading: string; subheadi
             </Alert>
           )}
 
-          {step === "email" ? (
+          {step === "totp" ? (
+            <Stack component="form" onSubmit={handleVerifyTotp} spacing={2}>
+              <Typography variant="body2" color="text.secondary">
+                Enter the 6-digit code from your authenticator app, or one of your backup codes.
+              </Typography>
+              <TextField
+                id="totp-code"
+                label="Authenticator or backup code"
+                required
+                autoFocus
+                fullWidth
+                value={totpCode}
+                onChange={(e) => setTotpCode(e.target.value)}
+                placeholder="123456"
+              />
+              <Button type="submit" variant="contained" size="large" disabled={busy || totpCode.length < 6} fullWidth>
+                {busy ? "Verifying…" : "Verify & continue"}
+              </Button>
+              <Button
+                type="button"
+                variant="text"
+                onClick={() => {
+                  setStep("email");
+                  setCode("");
+                  setTotpCode("");
+                  setChallengeToken(null);
+                  setDevCode(null);
+                }}
+              >
+                Start over
+              </Button>
+            </Stack>
+          ) : step === "email" ? (
             <Stack component="form" onSubmit={handleRequestOtp} spacing={2}>
               {oauthConfig && (oauthConfig.googleClientId || oauthConfig.linkedinClientId || oauthConfig.githubClientId) && (
                 <>

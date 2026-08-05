@@ -13,7 +13,7 @@ import {
 import { trpc } from "@/lib/trpc-client";
 import { useAuth } from "@/lib/auth-context";
 
-type Step = "email" | "code";
+type Step = "email" | "code" | "totp";
 
 export default function SignInScreen() {
   const { login } = useAuth();
@@ -24,6 +24,8 @@ export default function SignInScreen() {
   const [devCode, setDevCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [challengeToken, setChallengeToken] = useState<string | null>(null);
+  const [totpCode, setTotpCode] = useState("");
 
   async function handleRequestOtp() {
     setError(null);
@@ -43,7 +45,27 @@ export default function SignInScreen() {
     setError(null);
     setBusy(true);
     try {
-      const tokens = await trpc.auth.verifyOtp.mutate({ email: email.trim(), code });
+      const result = await trpc.auth.verifyOtp.mutate({ email: email.trim(), code });
+      if (result.totpRequired) {
+        setChallengeToken(result.challengeToken);
+        setStep("totp");
+        return;
+      }
+      await login(result);
+      router.replace("/");
+    } catch (err) {
+      setError(err instanceof TRPCClientError ? err.message : "Incorrect or expired code.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleVerifyTotp() {
+    if (!challengeToken) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const tokens = await trpc.auth.verifyTotpChallenge.mutate({ challengeToken, code: totpCode });
       await login(tokens);
       router.replace("/");
     } catch (err) {
@@ -63,7 +85,39 @@ export default function SignInScreen() {
         <Text style={styles.devCode}>No email provider configured — your dev code is {devCode}</Text>
       )}
 
-      {step === "email" ? (
+      {step === "totp" ? (
+        <>
+          <Text style={styles.label}>Authenticator or backup code</Text>
+          <TextInput
+            style={styles.input}
+            autoFocus
+            autoCapitalize="none"
+            placeholder="123456"
+            value={totpCode}
+            onChangeText={setTotpCode}
+          />
+          <Text style={styles.hint}>Enter the code from your authenticator app, or a backup code.</Text>
+          <Pressable
+            style={[styles.button, (busy || totpCode.length < 6) && styles.buttonDisabled]}
+            disabled={busy || totpCode.length < 6}
+            onPress={handleVerifyTotp}
+          >
+            {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Verify &amp; continue</Text>}
+          </Pressable>
+          <Pressable
+            style={styles.linkButton}
+            onPress={() => {
+              setStep("email");
+              setCode("");
+              setTotpCode("");
+              setChallengeToken(null);
+              setDevCode(null);
+            }}
+          >
+            <Text style={styles.linkText}>Start over</Text>
+          </Pressable>
+        </>
+      ) : step === "email" ? (
         <>
           <Text style={styles.label}>Email</Text>
           <TextInput

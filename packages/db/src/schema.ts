@@ -17,6 +17,13 @@ import {
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: text("email").notNull().unique(),
+  // AES-256-GCM ciphertext of the TOTP secret (see apps/api/src/lib/crypto.ts)
+  // — never stored in plaintext. Null until 2FA setup is confirmed.
+  totpSecretEnc: text("totp_secret_enc"),
+  totpEnabled: boolean("totp_enabled").notNull().default(false),
+  // SHA-256 hashes of one-time backup codes; each is nulled out (not removed,
+  // to preserve array positions/count) the moment it's consumed.
+  totpBackupCodeHashes: jsonb("totp_backup_code_hashes").$type<(string | null)[]>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

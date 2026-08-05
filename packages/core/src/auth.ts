@@ -45,6 +45,61 @@ export const authTokensSchema = z.object({
 });
 export type AuthTokens = z.infer<typeof authTokensSchema>;
 
+// verifyOtp's actual result: either a completed sign-in, or — when the
+// account has TOTP enabled — a short-lived challenge that must be resolved
+// with auth.verifyTotpChallenge before any session is issued. The email code
+// alone is never sufficient once 2FA is on.
+export const verifyOtpResultSchema = z.discriminatedUnion("totpRequired", [
+  authTokensSchema.extend({ totpRequired: z.literal(false) }),
+  z.object({ totpRequired: z.literal(true), challengeToken: z.string() }),
+]);
+export type VerifyOtpResult = z.infer<typeof verifyOtpResultSchema>;
+
+export const verifyTotpChallengeInput = z.object({
+  challengeToken: z.string().min(1),
+  // A TOTP code (6 digits) or a backup code ("XXXXX-XXXXX") — either is
+  // accepted here, see apps/api/src/lib/totp.ts.
+  code: z.string().min(6).max(11),
+});
+export type VerifyTotpChallengeInput = z.infer<typeof verifyTotpChallengeInput>;
+
+export const totpSetupBeginOutput = z.object({
+  base32Secret: z.string(),
+  otpauthUrl: z.string(),
+  qrCodeDataUrl: z.string(),
+});
+export type TotpSetupBeginOutput = z.infer<typeof totpSetupBeginOutput>;
+
+export const totpSetupConfirmInput = z.object({
+  base32Secret: z.string().min(1),
+  code: otpCodeSchema,
+});
+export type TotpSetupConfirmInput = z.infer<typeof totpSetupConfirmInput>;
+
+export const totpSetupConfirmOutput = z.object({
+  backupCodes: z.array(z.string()),
+});
+export type TotpSetupConfirmOutput = z.infer<typeof totpSetupConfirmOutput>;
+
+export const totpDisableInput = z.object({
+  // Require re-proving possession of the second factor (or a backup code) to
+  // turn 2FA off — otherwise a hijacked, already-open session could disable
+  // it unilaterally.
+  code: z.string().min(6).max(11),
+});
+export type TotpDisableInput = z.infer<typeof totpDisableInput>;
+
+export const requestEmailChangeInput = z.object({
+  newEmail: emailSchema,
+});
+export type RequestEmailChangeInput = z.infer<typeof requestEmailChangeInput>;
+
+export const confirmEmailChangeInput = z.object({
+  newEmail: emailSchema,
+  code: otpCodeSchema,
+});
+export type ConfirmEmailChangeInput = z.infer<typeof confirmEmailChangeInput>;
+
 export const accessTokenPayloadSchema = z.object({
   sub: z.string().uuid(),
   email: emailSchema,

@@ -3,6 +3,7 @@ import type { AuthTokens, AuthUser } from "@trafy-community/core";
 import { getStoredSession, storeSession, clearSession } from "./session";
 import { trpc } from "./trpc-client";
 import { disconnectSocket } from "./socket";
+import { posthog } from "./posthog";
 
 type AuthContextValue = {
   user: AuthUser | null;
@@ -27,6 +28,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const session = await getStoredSession();
       setUser(session?.user ?? null);
       setReady(true);
+      // Re-attach the PostHog session to this user on a cold start with an
+      // existing session, not just a fresh interactive login.
+      if (session?.user) posthog.identify(session.user.id, { email: session.user.email });
     })();
   }, []);
 
@@ -36,6 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Just authenticated interactively (OTP) — no need to re-gate behind
     // biometrics again in the same launch.
     setUnlocked(true);
+    posthog.identify(tokens.user.id, { email: tokens.user.email });
   };
 
   const logout = async () => {
@@ -47,6 +52,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     disconnectSocket();
     setUser(null);
     setUnlocked(false);
+    posthog.capture("user_logged_out");
+    posthog.reset();
   };
 
   const markUnlocked = () => setUnlocked(true);

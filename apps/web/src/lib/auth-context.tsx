@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import posthog from "posthog-js";
 import type { AuthUser } from "@trafy-community/core";
 import { getStoredSession, storeSession, clearSession } from "./session";
 import { trpc } from "./trpc-client";
@@ -19,7 +20,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const sync = () => setUser(getStoredSession()?.user ?? null);
+    const sync = () => {
+      const current = getStoredSession()?.user ?? null;
+      setUser(current);
+      // Re-attach the PostHog session to this user on a page reload, not
+      // just a fresh interactive login — otherwise every event after a
+      // refresh reports as an anonymous visitor.
+      if (current) posthog.identify(current.id, { email: current.email });
+    };
     sync();
     setReady(true);
     window.addEventListener("trafy-community:session-changed", sync);
@@ -29,6 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login: AuthContextValue["login"] = (tokens) => {
     storeSession(tokens);
     setUser(tokens.user);
+    posthog.identify(tokens.user.id, { email: tokens.user.email });
   };
 
   const logout = async () => {
@@ -38,6 +47,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     clearSession();
     setUser(null);
+    posthog.capture("user_logged_out");
+    posthog.reset();
   };
 
   return <AuthContext.Provider value={{ user, ready, login, logout }}>{children}</AuthContext.Provider>;
