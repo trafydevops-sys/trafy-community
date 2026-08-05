@@ -71,3 +71,8 @@ export const profileSchema = profileWizardInput.extend({
 });
 export type Profile = z.infer<typeof profileSchema>;
 
+// Privacy settings (privacySettingsSchema / updatePrivacySettingsInput) live in
+// ./privacy.ts, not here — this used to have its own duplicate copy (a 3-way
+// "connections" visibility enum the DB schema's plain `text` column and every
+// call site disagreed with) which collided with privacy.ts's exports in the
+// index.ts barrel. Removed as dead, unwired code rather than reconciled.

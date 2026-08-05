@@ -11,7 +11,7 @@ export default function CommunicationsSettingsPage() {
     <Stack spacing={4}>
       <Paper sx={{ p: 0, borderRadius: 2, overflow: "hidden" }}>
         <Box sx={{ p: 3, borderBottom: "1px solid", borderColor: "divider" }}>
-          <Typography variant="h6" fontWeight="bold">Notifications</Typography>
+          <Typography variant="h6" sx={{ fontWeight: "bold" }}>Notifications</Typography>
           <Typography variant="body2" color="text.secondary">Choose how and when you want to be notified.</Typography>
         </Box>
         

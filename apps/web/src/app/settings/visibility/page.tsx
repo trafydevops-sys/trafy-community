@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { trpc, withAuthRetry } from "@/lib/trpc-client";
+import type { PrivacySettingsInput, ProfileVisibility } from "@trafy-community/core";
 import Paper from "@mui/material/Paper";
 import Typography from "@mui/material/Typography";
 import Box from "@mui/material/Box";
@@ -15,39 +16,45 @@ import MenuItem from "@mui/material/MenuItem";
 export default function VisibilitySettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [privacy, setPrivacy] = useState<any>(null);
+  const [privacy, setPrivacy] = useState<PrivacySettingsInput | null>(null);
 
   useEffect(() => {
-    withAuthRetry(() => (trpc as any).profiles.get.query())
-      .then((data: any) => {
-        if (data.privacy) {
-          setPrivacy(data.privacy);
-        } else {
-          // Default fallbacks if no row exists yet
-          setPrivacy({
+    withAuthRetry(() => trpc.profile.get.query())
+      .then((data) => {
+        // Defaults when no privacy row exists yet — these mirror the defaults
+        // on privacySettingsInput in packages/core.
+        setPrivacy(
+          data.privacy ?? {
             profileVisibility: "public",
             showEmail: false,
             showEducation: true,
             showExperience: true,
             showCertificates: true,
-          });
-        }
+          }
+        );
       })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
 
-  const handleChange = async (key: string, value: any) => {
+  const handleChange = async <K extends keyof PrivacySettingsInput>(
+    key: K,
+    value: PrivacySettingsInput[K]
+  ) => {
     if (!privacy) return;
-    
+
+    const previous = privacy;
     const updated = { ...privacy, [key]: value };
     setPrivacy(updated);
     setSaving(true);
-    
+
     try {
-      await withAuthRetry(() => (trpc as any).profiles.updatePrivacy.mutate(updated));
+      await withAuthRetry(() => trpc.profile.updatePrivacy.mutate(updated));
     } catch (e) {
+      // Roll the toggle back so the UI never claims a setting was saved when
+      // it wasn't — otherwise a failed write silently looks like a success.
       console.error("Failed to update privacy settings", e);
+      setPrivacy(previous);
     } finally {
       setSaving(false);
     }
@@ -62,7 +69,7 @@ export default function VisibilitySettingsPage() {
       <Paper sx={{ p: 0, borderRadius: 2, overflow: "hidden" }}>
         <Box sx={{ p: 3, borderBottom: "1px solid", borderColor: "divider", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <Box>
-            <Typography variant="h6" fontWeight="bold">Profile viewing options</Typography>
+            <Typography variant="h6" sx={{ fontWeight: "bold" }}>Profile viewing options</Typography>
             <Typography variant="body2" color="text.secondary">Choose whether you're visible or viewing in private mode.</Typography>
           </Box>
           {saving && <CircularProgress size={20} />}
@@ -71,12 +78,14 @@ export default function VisibilitySettingsPage() {
         <Box sx={{ p: 3 }}>
           <Select
             size="small"
-            value={privacy?.profileVisibility || "public"}
-            onChange={(e) => handleChange("profileVisibility", e.target.value)}
+            value={privacy?.profileVisibility ?? "public"}
+            onChange={(e) => handleChange("profileVisibility", e.target.value as ProfileVisibility)}
             sx={{ minWidth: 200 }}
           >
+            {/* Only the two values profileVisibilitySchema accepts. A third
+                "connections" option used to be listed here, but the server
+                rejects it, so picking it failed validation on every save. */}
             <MenuItem value="public">Public (Everyone)</MenuItem>
-            <MenuItem value="connections">Connections only</MenuItem>
             <MenuItem value="private">Private</MenuItem>
           </Select>
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
@@ -88,7 +97,7 @@ export default function VisibilitySettingsPage() {
       <Paper sx={{ p: 0, borderRadius: 2, overflow: "hidden" }}>
         <Box sx={{ p: 3, borderBottom: "1px solid", borderColor: "divider", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <Box>
-            <Typography variant="h6" fontWeight="bold">Visibility of your profile & network</Typography>
+            <Typography variant="h6" sx={{ fontWeight: "bold" }}>Visibility of your profile & network</Typography>
             <Typography variant="body2" color="text.secondary">Choose what information people can see on your profile.</Typography>
           </Box>
           {saving && <CircularProgress size={20} />}

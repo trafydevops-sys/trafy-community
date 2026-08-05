@@ -33,7 +33,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   const pathname = usePathname();
 
   return (
-    <AppShell active="home">
+    <AppShell active="profile">
       <Container maxWidth="lg" sx={{ pt: 4, pb: 8 }}>
         <Grid container spacing={4}>
           {/* Left Sidebar */}
@@ -71,8 +71,10 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
                           primary={item.label}
                           slotProps={{
                             primary: {
-                              fontWeight: isActive ? "bold" : "medium",
-                              color: isActive ? "text.primary" : "text.secondary",
+                              sx: {
+                                fontWeight: isActive ? "bold" : "medium",
+                                color: isActive ? "text.primary" : "text.secondary",
+                              },
                             },
                           }}
                         />
