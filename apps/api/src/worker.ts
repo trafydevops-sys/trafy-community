@@ -6,6 +6,10 @@
  * synchronously via the keyword stub and never enqueues when it isn't (see
  * apps/api/src/routers/assessments.ts).
  */
+// Must load before every other module — see instrument.ts. Started via
+// `--import` in package.json's worker/start:worker scripts.
+import "./instrument.js";
+import * as Sentry from "@sentry/node";
 import { Worker } from "bullmq";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { schema } from "@trafy-community/db";
@@ -21,6 +25,15 @@ import { emitSessionAnswerGraded, emitSessionGraded } from "./lib/realtime.js";
 import { processBuildHarness } from "./lib/build-harness.js";
 
 const connection = queueConnection();
+
+// A BullMQ 'failed' event fires once a job has exhausted its retries (see the
+// `attempts`/`backoff` config on each queue in queue.ts) — worth reporting;
+// an individual retry attempt failing is expected noise, not a bug.
+function reportFailures(worker: Worker, queueName: string) {
+  worker.on("failed", (job, err) => {
+    Sentry.captureException(err, { tags: { queue: queueName }, extra: { jobId: job?.id, jobData: job?.data } });
+  });
+}
 
 const gradeWorker = new Worker<GradeCodeJob>(
   "grade-code",
@@ -74,7 +87,7 @@ const gradeWorker = new Worker<GradeCodeJob>(
   },
   { connection, concurrency: 4 },
 );
-
+reportFailures(gradeWorker, "grade-code");
 console.log("Worker up: grade-code");
 
 const plagiarismWorker = new Worker<PlagiarismCheckJob>(
@@ -84,6 +97,7 @@ const plagiarismWorker = new Worker<PlagiarismCheckJob>(
   },
   { connection, concurrency: 2 },
 );
+reportFailures(plagiarismWorker, "plagiarism-check");
 console.log("Worker up: plagiarism-check");
 
 const faceMatchWorker = new Worker<FaceMatchJob>(
@@ -93,6 +107,7 @@ const faceMatchWorker = new Worker<FaceMatchJob>(
   },
   { connection, concurrency: 2 },
 );
+reportFailures(faceMatchWorker, "face-match");
 console.log("Worker up: face-match");
 
 const vivaQuestionsWorker = new Worker<any>(
@@ -102,6 +117,7 @@ const vivaQuestionsWorker = new Worker<any>(
   },
   { connection, concurrency: 2 },
 );
+reportFailures(vivaQuestionsWorker, "viva-questions");
 console.log("Worker up: viva-questions");
 
 const vivaGradingWorker = new Worker<any>(
@@ -111,6 +127,7 @@ const vivaGradingWorker = new Worker<any>(
   },
   { connection, concurrency: 2 },
 );
+reportFailures(vivaGradingWorker, "viva-grading");
 console.log("Worker up: viva-grading");
 
 const buildHarnessWorker = new Worker<BuildHarnessJob>(
@@ -120,17 +137,19 @@ const buildHarnessWorker = new Worker<BuildHarnessJob>(
   },
   { connection, concurrency: 2 },
 );
+reportFailures(buildHarnessWorker, "build-harness");
 console.log("Worker up: build-harness");
 
 async function shutdown() {
   await Promise.all([
-    gradeWorker.close(), 
-    plagiarismWorker.close(), 
+    gradeWorker.close(),
+    plagiarismWorker.close(),
     faceMatchWorker.close(),
     vivaQuestionsWorker.close(),
     vivaGradingWorker.close(),
     buildHarnessWorker.close()
   ]);
+  await Sentry.close(2000);
   process.exit(0);
 }
 process.on("SIGINT", shutdown);

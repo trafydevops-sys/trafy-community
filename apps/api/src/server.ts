@@ -1,8 +1,14 @@
+// Must be the first import — see instrument.ts. Started via `--import` in
+// package.json's dev/start/worker scripts, so this static import is really
+// just documentation of the load order; the flag is what makes it real.
+import "./instrument.js";
+import * as Sentry from "@sentry/node";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
-import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
+import { fastifyTRPCPlugin, type FastifyTRPCPluginOptions } from "@trpc/server/adapters/fastify";
+import { TRPCError } from "@trpc/server";
 import { fileURLToPath } from "node:url";
 import { uploadKindSchema } from "@trafy-community/core";
 import { env } from "./lib/env.js";
@@ -10,9 +16,14 @@ import { createContext } from "./lib/context.js";
 import { verifyAccessToken } from "./lib/tokens.js";
 import { saveUpload } from "./lib/storage.js";
 import { initRealtime } from "./lib/realtime.js";
-import { appRouter } from "./routers/index.js";
+import { shutdownPostHog } from "./lib/posthog.js";
+import { appRouter, type AppRouter } from "./routers/index.js";
 
 const app = Fastify({ logger: true });
+
+// Before routes, per Sentry's Fastify integration (unlike Express) — captures
+// framework-level errors that never reach a route handler.
+Sentry.setupFastifyErrorHandler(app);
 
 await app.register(cors, { origin: true });
 await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
@@ -23,7 +34,22 @@ await app.register(fastifyStatic, {
 
 await app.register(fastifyTRPCPlugin, {
   prefix: "/trpc",
-  trpcOptions: { router: appRouter, createContext },
+  trpcOptions: {
+    router: appRouter,
+    createContext,
+    // tRPC catches its own procedure errors and returns them as a normal
+    // (non-5xx) response, so setupFastifyErrorHandler above never sees them —
+    // this is the only hook that does. Only report genuinely unexpected
+    // failures: expected control-flow errors (bad input, not found, a
+    // deliberate FORBIDDEN/UNAUTHORIZED) would otherwise flood Sentry with
+    // noise that isn't a bug.
+    onError({ error, path, type }) {
+      const isExpected = error instanceof TRPCError && error.code !== "INTERNAL_SERVER_ERROR";
+      if (!isExpected) {
+        Sentry.captureException(error, { tags: { trpcPath: path, trpcType: type } });
+      }
+    },
+  } satisfies FastifyTRPCPluginOptions<AppRouter>["trpcOptions"],
 });
 
 app.get("/health", async () => ({ ok: true, service: "trafy-community-api" }));
@@ -76,3 +102,19 @@ app
     app.log.error(err);
     process.exit(1);
   });
+
+// Without this, a deploy (or any SIGTERM) kills the process mid-request and
+// drops whatever Sentry/PostHog events were still queued in memory — same
+// class of gap as the missing graceful shutdown flagged in the production
+// readiness audit.
+async function shutdown(signal: string) {
+  app.log.info(`${signal} received, shutting down gracefully`);
+  try {
+    await app.close();
+    await Promise.all([Sentry.close(2000), shutdownPostHog()]);
+  } finally {
+    process.exit(0);
+  }
+}
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
