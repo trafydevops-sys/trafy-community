@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { sql, eq, and, desc, isNotNull, inArray, gte, lte } from "drizzle-orm";
+import { sql, eq, and, desc, isNotNull, inArray, gte, lte, count } from "drizzle-orm";
 import { schema } from "@trafy-community/db";
-import { protectedProcedure, router } from "../lib/trpc.js";
+import { protectedProcedure, publicProcedure, router } from "../lib/trpc.js";
 import { TRPCError } from "@trpc/server";
 import { Redis } from "ioredis";
 import { env } from "../lib/env.js";
@@ -10,6 +10,8 @@ import {
   timeToHireInput,
   assessmentDropoffInput,
   scoreOutcomeInput,
+  recordProfileViewInput,
+  recordPostImpressionsInput,
 } from "@trafy-community/core";
 
 // Reuse existing bullmq connection if possible or create a new one
@@ -376,4 +378,54 @@ export const analyticsRouter = router({
         };
       });
     }),
+
+  // Record a profile view (public procedure so non-logged-in users can also trigger it, though viewerId will be null)
+  recordProfileView: publicProcedure
+    .input(recordProfileViewInput)
+    .mutation(async ({ input, ctx }) => {
+      await ctx.db.insert(schema.profileViews).values({
+        profileOwnerId: input.viewedUserId,
+        viewerId: ctx.user?.sub || null, // Optional tracking of who viewed
+      });
+      return { success: true };
+    }),
+
+  // Record impressions for multiple posts loaded in the feed
+  recordPostImpressions: publicProcedure
+    .input(recordPostImpressionsInput)
+    .mutation(async ({ input, ctx }) => {
+      if (!input.postIds.length) return { success: true };
+
+      // Bulk insert impressions for all provided post IDs
+      await ctx.db.insert(schema.postImpressions).values(
+        input.postIds.map((postId) => ({
+          postId,
+          viewerId: ctx.user?.sub || null,
+        }))
+      );
+      return { success: true };
+    }),
+
+  // Fetch the dashboard stats for the currently logged-in user
+  getStats: protectedProcedure.query(async ({ ctx }) => {
+    const userId = ctx.user.sub;
+
+    // 1. Get total profile views for this user
+    const profileViewsResult = await ctx.db
+      .select({ views: count() })
+      .from(schema.profileViews)
+      .where(eq(schema.profileViews.profileOwnerId, userId));
+
+    // 2. Get total post impressions for all posts authored by this user
+    const postImpressionsResult = await ctx.db
+      .select({ impressions: count() })
+      .from(schema.postImpressions)
+      .innerJoin(schema.posts, eq(schema.posts.id, schema.postImpressions.postId))
+      .where(eq(schema.posts.authorId, userId));
+
+    return {
+      profileViewsCount: profileViewsResult[0]?.views ?? 0,
+      postImpressionsCount: postImpressionsResult[0]?.impressions ?? 0,
+    };
+  }),
 });

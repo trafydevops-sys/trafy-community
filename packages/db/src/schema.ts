@@ -1081,3 +1081,38 @@ export const vivaAnswers = pgTable(
   },
   (table) => [index("viva_answers_viva_idx").on(table.vivaId)]
 );
+
+// ─── Real-Time Analytics ────────────────────────────────────────────
+
+export const profileViews = pgTable(
+  "profile_views",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    profileOwnerId: uuid("profile_owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    viewerId: uuid("viewer_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("profile_views_owner_idx").on(table.profileOwnerId),
+    index("profile_views_viewer_idx").on(table.viewerId),
+  ]
+);
+
+export const postImpressions = pgTable(
+  "post_impressions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => posts.id, { onDelete: "cascade" }),
+    viewerId: uuid("viewer_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("post_impressions_post_idx").on(table.postId),
+    index("post_impressions_viewer_idx").on(table.viewerId),
+  ]
+);
+

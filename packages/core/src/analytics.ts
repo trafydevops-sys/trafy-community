@@ -76,3 +76,20 @@ export const scoreOutcomeOutput = z.object({
   avgScoreHired: z.number().optional(),
   avgScoreRejected: z.number().optional(),
 });
+
+// ─── Real-Time Dashboard ────────────────────────────────────────────
+export const recordProfileViewInput = z.object({
+  viewedUserId: z.string().uuid(),
+});
+export type RecordProfileViewInput = z.infer<typeof recordProfileViewInput>;
+
+export const recordPostImpressionsInput = z.object({
+  postIds: z.array(z.string().uuid()).min(1),
+});
+export type RecordPostImpressionsInput = z.infer<typeof recordPostImpressionsInput>;
+
+export const getDashboardAnalyticsOutput = z.object({
+  profileViewsCount: z.number(),
+  postImpressionsCount: z.number(),
+});
+export type GetDashboardAnalyticsOutput = z.infer<typeof getDashboardAnalyticsOutput>;

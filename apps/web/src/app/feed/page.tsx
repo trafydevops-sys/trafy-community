@@ -597,6 +597,8 @@ export default function FeedPage() {
   const [news, setNews] = useState<any[]>([]);
   const [newsLoading, setNewsLoading] = useState(true);
 
+  const [stats, setStats] = useState({ profileViewsCount: 0, postImpressionsCount: 0 });
+
   async function loadFeed(currentScope: typeof scope) {
     setLoading(true);
     setError(null);
@@ -617,8 +619,21 @@ export default function FeedPage() {
       .then((data) => setNews(data as any[]))
       .catch(() => {})
       .finally(() => setNewsLoading(false));
+
+    withAuthRetry(() => (trpc as any).analytics.getStats.query())
+      .then((data) => setStats(data as any))
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope]);
+
+  useEffect(() => {
+    if (posts.length > 0) {
+      const postIds = posts.map((p) => p.id);
+      withAuthRetry(() =>
+        (trpc as any).analytics.recordPostImpressions.mutate({ postIds })
+      ).catch(() => {});
+    }
+  }, [posts]);
 
   function handleUpdate(updated: Post) {
     setPosts((curr) => curr.map((p) => (p.id === updated.id ? updated : p)));
@@ -646,11 +661,11 @@ export default function FeedPage() {
                 <Divider sx={{ my: 1.5 }} />
                 <Box sx={{ display: "flex", justifyContent: "space-between", cursor: "pointer", "&:hover": { bgcolor: "rgba(0,0,0,0.04)" }, p: 0.5, borderRadius: 1 }}>
                   <Typography variant="body2" color="text.secondary">Profile viewers</Typography>
-                  <Typography variant="body2" color="primary" sx={{ fontWeight: "bold" }}>128</Typography>
+                  <Typography variant="body2" color="primary" sx={{ fontWeight: "bold" }}>{stats.profileViewsCount}</Typography>
                 </Box>
                 <Box sx={{ display: "flex", justifyContent: "space-between", mt: 0.5, cursor: "pointer", "&:hover": { bgcolor: "rgba(0,0,0,0.04)" }, p: 0.5, borderRadius: 1 }}>
                   <Typography variant="body2" color="text.secondary">Post impressions</Typography>
-                  <Typography variant="body2" color="primary" sx={{ fontWeight: "bold" }}>342</Typography>
+                  <Typography variant="body2" color="primary" sx={{ fontWeight: "bold" }}>{stats.postImpressionsCount}</Typography>
                 </Box>
               </Box>
             </Paper>
