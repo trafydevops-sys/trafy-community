@@ -13,7 +13,7 @@ vi.mock("@aws-sdk/client-s3", async (importOriginal) => {
   return { ...actual, S3Client: vi.fn().mockImplementation(() => ({ send })) };
 });
 
-import { requireS3Config, publicUrlFor, saveUpload } from "../src/lib/storage.js";
+import { requireS3Config, publicUrlFor, publicBaseUrl, saveUpload } from "../src/lib/storage.js";
 import { env, usingLocalStorage } from "../src/lib/env.js";
 
 describe("requireS3Config", () => {
@@ -60,6 +60,37 @@ describe("publicUrlFor", () => {
     expect(publicUrlFor({ ...base, publicUrl: "https://cdn.trafy.example.com/" }, "user-123/avatar-abc.png")).toBe(
       "https://cdn.trafy.example.com/user-123/avatar-abc.png"
     );
+  });
+
+  // Regression: reading back off Supabase's S3 endpoint yields "AccessDenied —
+  // Missing signature" on a plain GET, so <img src> renders a broken image even
+  // though the upload itself succeeded. Public reads live on a different path.
+  it("maps a Supabase S3 endpoint to its public object route, not the S3 route", () => {
+    const supabase = {
+      ...base,
+      endpoint: "https://fxdyeprrmnvpdrzugvzb.storage.supabase.co/storage/v1/s3",
+    };
+    expect(publicBaseUrl(supabase)).toBe(
+      "https://fxdyeprrmnvpdrzugvzb.storage.supabase.co/storage/v1/object/public/trafy-uploads"
+    );
+    expect(publicUrlFor(supabase, "user-123/avatar-abc.jpg")).toBe(
+      "https://fxdyeprrmnvpdrzugvzb.storage.supabase.co/storage/v1/object/public/trafy-uploads/user-123/avatar-abc.jpg"
+    );
+    expect(publicUrlFor(supabase, "k.jpg")).not.toContain("/storage/v1/s3/");
+  });
+
+  it("still lets S3_PUBLIC_URL override the Supabase derivation", () => {
+    expect(
+      publicBaseUrl({
+        ...base,
+        endpoint: "https://ref.storage.supabase.co/storage/v1/s3",
+        publicUrl: "https://cdn.trafy.example.com",
+      })
+    ).toBe("https://cdn.trafy.example.com");
+  });
+
+  it("leaves a non-Supabase endpoint on path-style", () => {
+    expect(publicBaseUrl(base)).toBe("https://accountid.r2.cloudflarestorage.com/trafy-uploads");
   });
 });
 

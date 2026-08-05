@@ -11,7 +11,13 @@ import { getTheme } from "@/lib/theme";
 const THEME_COOKIE = "trafy-theme";
 const THEME_COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year
 
-const ThemeModeContext = createContext<{ mode: PaletteMode; toggleMode: () => void } | null>(null);
+const ThemeModeContext = createContext<{
+  mode: PaletteMode;
+  toggleMode: () => void;
+  /** Select a mode directly, for pickers that show every option at once
+   *  rather than flipping between two. */
+  setMode: (mode: PaletteMode) => void;
+} | null>(null);
 
 export function useThemeMode() {
   const ctx = useContext(ThemeModeContext);
@@ -92,15 +98,16 @@ export function ThemeRegistry({
 
   const theme = useMemo(() => getTheme(mode), [mode]);
 
-  const toggleMode = () => {
-    const next: PaletteMode = mode === "light" ? "dark" : "light";
+  const selectMode = (next: PaletteMode) => {
     setMode(next);
     applyMode(next);
   };
 
+  const toggleMode = () => selectMode(mode === "light" ? "dark" : "light");
+
   return (
     <CacheProvider value={cache}>
-      <ThemeModeContext.Provider value={{ mode, toggleMode }}>
+      <ThemeModeContext.Provider value={{ mode, toggleMode, setMode: selectMode }}>
         <ThemeProvider theme={theme}>
           <CssBaseline />
           {children}

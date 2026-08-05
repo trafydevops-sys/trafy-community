@@ -48,12 +48,30 @@ export function requireS3Config(env: {
   };
 }
 
+/**
+ * The base URL a browser reads uploads back from. This is NOT always the S3
+ * endpoint: an S3 API endpoint speaks the signed SigV4 protocol, so a plain
+ * GET from an <img> tag gets "AccessDenied — Missing signature". Resolution
+ * order:
+ *   1. S3_PUBLIC_URL, if set — a CDN or public bucket host. Always wins.
+ *   2. Supabase, detected by its /storage/v1/s3 endpoint suffix, which reads
+ *      back from /storage/v1/object/public/<bucket> instead.
+ *   3. Path-style off the endpoint — correct for R2/MinIO/Spaces/S3 buckets
+ *      that serve public reads from the same host they accept writes on.
+ */
+export function publicBaseUrl(config: S3Config): string {
+  if (config.publicUrl) return config.publicUrl.replace(/\/$/, "");
+
+  const supabase = config.endpoint.match(/^(.*)\/storage\/v1\/s3\/?$/);
+  if (supabase) return `${supabase[1]}/storage/v1/object/public/${config.bucket}`;
+
+  return `${config.endpoint.replace(/\/$/, "")}/${config.bucket}`;
+}
+
 /** Pure. e.g. https://accountid.r2.cloudflarestorage.com + trafy-uploads/abc
- *  -> https://accountid.r2.cloudflarestorage.com/trafy-uploads/abc, or the
- *  configured public/CDN host in front of the bucket when set. */
+ *  -> https://accountid.r2.cloudflarestorage.com/trafy-uploads/abc */
 export function publicUrlFor(config: S3Config, key: string): string {
-  const host = config.publicUrl ?? `${config.endpoint}/${config.bucket}`;
-  return `${host.replace(/\/$/, "")}/${key}`;
+  return `${publicBaseUrl(config)}/${key}`;
 }
 
 let s3: S3Client | null = null;

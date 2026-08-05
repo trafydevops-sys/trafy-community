@@ -15,6 +15,7 @@ import { env } from "./lib/env.js";
 import { createContext } from "./lib/context.js";
 import { verifyAccessToken } from "./lib/tokens.js";
 import { saveUpload } from "./lib/storage.js";
+import { buildDataExport } from "./lib/export.js";
 import { initRealtime } from "./lib/realtime.js";
 import { shutdownPostHog } from "./lib/posthog.js";
 import { appRouter, type AppRouter } from "./routers/index.js";
@@ -88,6 +89,32 @@ app.post("/uploads/:kind", async (request, reply) => {
   });
 
   return reply.send(result);
+});
+
+// Plain route, not tRPC: a zip is a binary stream, and tRPC's transport
+// (JSON over HTTP, batched) has no way to return one. Auth is checked
+// manually for the same reason the upload route above does it manually.
+app.get("/account/export", async (request, reply) => {
+  const authHeader = request.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    return reply.code(401).send({ error: "Sign in required." });
+  }
+
+  let userId: string;
+  let email: string;
+  try {
+    const payload = await verifyAccessToken(authHeader.slice("Bearer ".length));
+    userId = payload.sub;
+    email = payload.email;
+  } catch {
+    return reply.code(401).send({ error: "Invalid or expired session." });
+  }
+
+  const archive = buildDataExport(userId, email);
+  const filename = `trafy-community-export-${new Date().toISOString().slice(0, 10)}.zip`;
+  reply.header("Content-Type", "application/zip");
+  reply.header("Content-Disposition", `attachment; filename="${filename}"`);
+  return reply.send(archive);
 });
 
 initRealtime(app.server);
