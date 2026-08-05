@@ -263,6 +263,7 @@ export type BankQuestion = z.infer<typeof bankQuestionSchema>;
 
 export const createAssessmentInput = z.object({
   title: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(2000).optional(),
   track: trackSchema,
   layer: z.union([z.literal(1), z.literal(2)]).default(1),
   timeLimitSeconds: z
@@ -271,7 +272,9 @@ export const createAssessmentInput = z.object({
     .min(30)
     .max(4 * 60 * 60)
     .optional(),
-  questionIds: z.array(z.string().uuid()).min(1).max(50),
+  /** Empty is allowed: an assessment starts as a draft and gets its questions
+   *  attached in the editor. Publishing is what requires at least one. */
+  questionIds: z.array(z.string().uuid()).max(50).default([]),
   jobId: z.string().uuid().optional(),
 });
 export type CreateAssessmentInput = z.infer<typeof createAssessmentInput>;
@@ -279,16 +282,57 @@ export type CreateAssessmentInput = z.infer<typeof createAssessmentInput>;
 export const assessmentSummarySchema = z.object({
   id: z.string().uuid(),
   title: z.string(),
+  description: z.string().nullable(),
   track: trackSchema,
   layer: z.number().int(),
   timeLimitSeconds: z.number().int().nullable(),
   questionCount: z.number().int().nonnegative(),
+  published: z.boolean(),
   jobId: z.string().uuid().nullable(),
   authorId: z.string().uuid(),
   authorName: z.string(),
   createdAt: z.string(),
 });
 export type AssessmentSummary = z.infer<typeof assessmentSummarySchema>;
+
+/* ── Catalog + authoring (tRPC input/output) ── */
+
+export const listAssessmentsInput = z
+  .object({ track: trackSchema.optional() })
+  .default({});
+export type ListAssessmentsInput = z.infer<typeof listAssessmentsInput>;
+
+export const assessmentIdInput = z.object({ assessmentId: z.string().uuid() });
+export type AssessmentIdInput = z.infer<typeof assessmentIdInput>;
+
+export const setAssessmentQuestionsInput = z.object({
+  assessmentId: z.string().uuid(),
+  questionIds: z.array(z.string().uuid()).max(50),
+});
+export type SetAssessmentQuestionsInput = z.infer<typeof setAssessmentQuestionsInput>;
+
+export const setAssessmentPublishedInput = z.object({
+  assessmentId: z.string().uuid(),
+  published: z.boolean(),
+});
+export type SetAssessmentPublishedInput = z.infer<typeof setAssessmentPublishedInput>;
+
+/** A question as shown to an author while assembling a test — prompt and kind,
+ *  never the answer key (see toSafePayload). */
+export const attachedQuestionSchema = z.object({
+  id: z.string().uuid(),
+  kind: questionKindSchema,
+  prompt: z.string(),
+  track: trackSchema,
+  difficulty: z.number().int(),
+  payload: z.unknown(),
+});
+export type AttachedQuestion = z.infer<typeof attachedQuestionSchema>;
+
+export const assessmentForEditSchema = assessmentSummarySchema.extend({
+  questions: z.array(attachedQuestionSchema),
+});
+export type AssessmentForEdit = z.infer<typeof assessmentForEditSchema>;
 
 /* ── Sessions (runner, tRPC input/output) ── */
 

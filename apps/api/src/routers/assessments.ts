@@ -18,7 +18,13 @@ import {
   submitSessionInput,
   toSafePayload,
   updateBankQuestionInput,
+  assessmentIdInput,
+  listAssessmentsInput,
+  setAssessmentPublishedInput,
+  setAssessmentQuestionsInput,
+  type AssessmentForEdit,
   type AssessmentSummary,
+  type AttachedQuestion,
   type BankQuestion,
   type NextQuestionResult,
   type QuestionKind,
@@ -63,15 +69,25 @@ async function toAssessmentSummary(row: typeof schema.assessments.$inferSelect):
   return {
     id: row.id,
     title: row.title,
+    description: row.description,
     track: row.track as AssessmentSummary["track"],
     layer: row.layer,
     timeLimitSeconds: row.timeLimitSeconds,
     questionCount: (row.questionIds as string[]).length,
+    published: row.published,
     jobId: row.jobId,
     authorId: row.authorId,
     authorName: await authorName(row.authorId),
     createdAt: row.createdAt.toISOString(),
   };
+}
+
+/** Loads an assessment and asserts the caller authored it. */
+async function requireOwnAssessment(assessmentId: string, userId: string) {
+  const [assessment] = await db.select().from(schema.assessments).where(eq(schema.assessments.id, assessmentId)).limit(1);
+  if (!assessment) throw new TRPCError({ code: "NOT_FOUND", message: "Assessment not found." });
+  if (assessment.authorId !== userId) throw new TRPCError({ code: "FORBIDDEN", message: "Not your assessment." });
+  return assessment;
 }
 
 async function requireOwnActiveSession(sessionId: string, userId: string) {
@@ -118,8 +134,12 @@ export const assessmentsRouter = router({
       return toBankQuestion(row);
     }),
 
-    list: protectedProcedure.input(listBankQuestionsInput).query(async ({ input }) => {
-      const conditions = [eq(schema.questionBank.active, true)];
+    // Scoped to the caller's own questions. toBankQuestion returns the raw
+    // payload — which holds correctIndex / acceptable / keywords / hidden test
+    // cases — so listing the whole bank to every signed-in user would hand out
+    // the answer key to every question on the platform.
+    list: protectedProcedure.input(listBankQuestionsInput).query(async ({ ctx, input }) => {
+      const conditions = [eq(schema.questionBank.active, true), eq(schema.questionBank.authorId, ctx.user.sub)];
       if (input.track) conditions.push(eq(schema.questionBank.track, input.track));
       const rows = await db.select().from(schema.questionBank).where(and(...conditions));
       const filtered = input.skillTag ? rows.filter((r) => (r.skillTags as string[]).includes(input.skillTag!)) : rows;
@@ -127,18 +147,105 @@ export const assessmentsRouter = router({
     }),
   }),
 
+  /** Catalog of published, openly-joinable assessments. Invite-only tests are
+   *  excluded — those are reached through a recruiter invite token instead. */
+  list: protectedProcedure.input(listAssessmentsInput).query(async ({ input }) => {
+    const conditions = [eq(schema.assessments.published, true), eq(schema.assessments.inviteOnly, false)];
+    if (input.track) conditions.push(eq(schema.assessments.track, input.track));
+    const rows = await db
+      .select()
+      .from(schema.assessments)
+      .where(and(...conditions))
+      .orderBy(desc(schema.assessments.createdAt));
+    return Promise.all(rows.map(toAssessmentSummary));
+  }),
+
+  listMine: protectedProcedure.query(async ({ ctx }) => {
+    const rows = await db
+      .select()
+      .from(schema.assessments)
+      .where(eq(schema.assessments.authorId, ctx.user.sub))
+      .orderBy(desc(schema.assessments.createdAt));
+    return Promise.all(rows.map(toAssessmentSummary));
+  }),
+
+  getForEdit: protectedProcedure.input(assessmentIdInput).query(async ({ ctx, input }) => {
+    const assessment = await requireOwnAssessment(input.assessmentId, ctx.user.sub);
+    const questionIds = assessment.questionIds as string[];
+    const rows = questionIds.length
+      ? await db.select().from(schema.questionBank).where(inArray(schema.questionBank.id, questionIds))
+      : [];
+    // Preserve the author's ordering — inArray returns rows in table order.
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const questions: AttachedQuestion[] = questionIds.flatMap((id) => {
+      const row = byId.get(id);
+      if (!row) return [];
+      const kind = row.kind as QuestionKind;
+      return [
+        {
+          id: row.id,
+          kind,
+          prompt: row.prompt,
+          track: row.track as AttachedQuestion["track"],
+          difficulty: row.difficulty,
+          payload: toSafePayload(kind, row.payload),
+        },
+      ];
+    });
+    const summary = await toAssessmentSummary(assessment);
+    const result: AssessmentForEdit = { ...summary, questions };
+    return result;
+  }),
+
+  setQuestions: protectedProcedure.input(setAssessmentQuestionsInput).mutation(async ({ ctx, input }) => {
+    await requireOwnAssessment(input.assessmentId, ctx.user.sub);
+    if (input.questionIds.length > 0) {
+      const found = await db
+        .select({ id: schema.questionBank.id })
+        .from(schema.questionBank)
+        .where(inArray(schema.questionBank.id, input.questionIds));
+      if (found.length !== new Set(input.questionIds).size) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "One or more question ids don't exist." });
+      }
+    }
+    const [row] = await db
+      .update(schema.assessments)
+      .set({ questionIds: input.questionIds })
+      .where(eq(schema.assessments.id, input.assessmentId))
+      .returning();
+    if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+    return toAssessmentSummary(row);
+  }),
+
+  setPublished: protectedProcedure.input(setAssessmentPublishedInput).mutation(async ({ ctx, input }) => {
+    const assessment = await requireOwnAssessment(input.assessmentId, ctx.user.sub);
+    if (input.published && (assessment.questionIds as string[]).length === 0) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Add at least one question before publishing." });
+    }
+    const [row] = await db
+      .update(schema.assessments)
+      .set({ published: input.published })
+      .where(eq(schema.assessments.id, input.assessmentId))
+      .returning();
+    if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+    return toAssessmentSummary(row);
+  }),
+
   create: protectedProcedure.input(createAssessmentInput).mutation(async ({ ctx, input }) => {
-    const questionRows = await db
-      .select({ id: schema.questionBank.id })
-      .from(schema.questionBank)
-      .where(inArray(schema.questionBank.id, input.questionIds));
-    if (questionRows.length !== input.questionIds.length) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "One or more question ids don't exist." });
+    if (input.questionIds.length > 0) {
+      const questionRows = await db
+        .select({ id: schema.questionBank.id })
+        .from(schema.questionBank)
+        .where(inArray(schema.questionBank.id, input.questionIds));
+      if (questionRows.length !== new Set(input.questionIds).size) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "One or more question ids don't exist." });
+      }
     }
     const [row] = await db
       .insert(schema.assessments)
       .values({
         title: input.title,
+        description: input.description,
         track: input.track,
         layer: input.layer,
         timeLimitSeconds: input.timeLimitSeconds,

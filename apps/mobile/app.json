@@ -25,7 +25,15 @@
         }
       ],
       "expo-notifications",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "@sentry/react-native",
+        {
+          "url": "https://sentry.io/",
+          "disableAutoUpload": true
+        }
+      ],
+      "expo-localization"
     ]
   }
 }
