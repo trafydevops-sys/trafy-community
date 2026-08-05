@@ -70,3 +70,4 @@ export const profileSchema = profileWizardInput.extend({
   updatedAt: z.string(),
 });
 export type Profile = z.infer<typeof profileSchema>;
+
