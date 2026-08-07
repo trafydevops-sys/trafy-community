@@ -37,6 +37,7 @@ import {
   generateTotpSecret,
   verifyTotpCode,
 } from "../lib/totp.js";
+import { syncExpiredSuspension } from "../lib/account-status.js";
 
 async function findOrCreateUser(email: string, source: "otp" | "google" | "linkedin" | "github") {
   const [existing] = await db.select().from(schema.users).where(eq(schema.users.email, email)).limit(1);
@@ -172,13 +173,18 @@ export const authRouter = router({
   }),
 
   me: protectedProcedure.query(async ({ ctx }) => {
-    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, ctx.user.sub)).limit(1);
-    if (!user) throw new TRPCError({ code: "NOT_FOUND" });
+    const [row] = await db.select().from(schema.users).where(eq(schema.users.id, ctx.user.sub)).limit(1);
+    if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+    const user = await syncExpiredSuspension(row);
     return {
       id: user.id,
-      email: user.email,
-      createdAt: user.createdAt.toISOString(),
-      totpEnabled: user.totpEnabled,
+      email: row.email,
+      createdAt: row.createdAt.toISOString(),
+      totpEnabled: row.totpEnabled,
+      status: user.status as "active" | "suspended" | "banned",
+      statusReason: user.status === "active" ? null : row.statusReason,
+      suspendedUntil: user.suspendedUntil ? user.suspendedUntil.toISOString() : null,
+      trustScore: row.trustScore,
     };
   }),
 

@@ -155,6 +155,13 @@
       "when": 1785906945185,
       "tag": "0021_bright_spacker_dave",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1785962983217,
+      "tag": "0022_zippy_lightspeed",
+      "breakpoints": true
     }
   ]
 }

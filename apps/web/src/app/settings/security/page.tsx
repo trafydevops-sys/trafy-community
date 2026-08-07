@@ -20,9 +20,96 @@ import Alert from "@mui/material/Alert";
 import CircularProgress from "@mui/material/CircularProgress";
 import Chip from "@mui/material/Chip";
 import VerifiedUserIcon from "@mui/icons-material/VerifiedUser";
+import type { MyStanding } from "@trafy-community/core";
 
 function errorMessage(err: unknown, fallback: string): string {
   return err instanceof TRPCClientError ? err.message : fallback;
+}
+
+// --- Account standing / appeal --------------------------------------------
+
+function AccountStandingCard() {
+  const [standing, setStanding] = useState<MyStanding | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  function refresh() {
+    withAuthRetry(() => trpc.moderation.myStanding.query())
+      .then(setStanding)
+      .catch(() => setStanding(null));
+  }
+
+  useEffect(refresh, []);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      await withAuthRetry(() => trpc.moderation.submitAppeal.mutate({ reason }));
+      setSubmitted(true);
+      setDialogOpen(false);
+      refresh();
+    } catch (err) {
+      setError(errorMessage(err, "Couldn't submit your appeal."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!standing || standing.status === "active") return null;
+
+  return (
+    <Paper sx={{ p: 0, borderRadius: 2, overflow: "hidden", border: "1px solid", borderColor: "error.main" }}>
+      <Box sx={{ p: 3 }}>
+        <Alert severity={standing.status === "banned" ? "error" : "warning"} sx={{ mb: 2 }}>
+          Your account is {standing.status}
+          {standing.suspendedUntil ? ` until ${new Date(standing.suspendedUntil).toLocaleDateString()}` : ""}.
+          {standing.statusReason ? ` Reason: ${standing.statusReason}` : ""}
+        </Alert>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          You can still browse, but posting and other actions are restricted while this is in effect.
+        </Typography>
+        {submitted || standing.hasPendingAppeal ? (
+          <Chip label="Appeal submitted — under review" color="info" size="small" />
+        ) : (
+          <Button variant="contained" size="small" onClick={() => setDialogOpen(true)}>
+            Appeal this decision
+          </Button>
+        )}
+      </Box>
+
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Appeal your {standing.status}</DialogTitle>
+        <Box component="form" onSubmit={handleSubmit}>
+          <DialogContent>
+            <Stack spacing={2}>
+              {error && <Alert severity="error">{error}</Alert>}
+              <TextField
+                label="Why should this be reconsidered?"
+                multiline
+                rows={4}
+                required
+                autoFocus
+                fullWidth
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
+            <Button type="submit" variant="contained" disabled={busy || !reason.trim()}>
+              {busy ? "Submitting…" : "Submit appeal"}
+            </Button>
+          </DialogActions>
+        </Box>
+      </Dialog>
+    </Paper>
+  );
 }
 
 // --- Change email ------------------------------------------------------
@@ -398,6 +485,8 @@ export default function SecuritySettingsPage() {
 
   return (
     <Stack spacing={4}>
+      <AccountStandingCard />
+
       <Paper sx={{ p: 0, borderRadius: 2, overflow: "hidden" }}>
         <Box sx={{ p: 3, borderBottom: "1px solid", borderColor: "divider" }}>
           <Typography variant="h6" sx={{ fontWeight: "bold" }}>Account access</Typography>

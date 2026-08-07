@@ -12,6 +12,7 @@ import {
   unique,
   uuid,
   varchar,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
@@ -24,6 +25,17 @@ export const users = pgTable("users", {
   // SHA-256 hashes of one-time backup codes; each is nulled out (not removed,
   // to preserve array positions/count) the moment it's consumed.
   totpBackupCodeHashes: jsonb("totp_backup_code_hashes").$type<(string | null)[]>(),
+  // --- Trust & moderation state — see Milestone 9 (admin/moderation router) ---
+  // 0-100, starts at 100 and is nudged by moderation actions; feed/discover
+  // ranking can fold this in later, but today it's mainly an admin signal.
+  trustScore: integer("trust_score").notNull().default(100),
+  status: text("status").notNull().default("active"), // 'active' | 'suspended' | 'banned'
+  statusReason: text("status_reason"),
+  // Set only for 'suspended' — a background sweep (and lazy checks on
+  // login/`auth.me`) flips status back to 'active' once this passes.
+  suspendedUntil: timestamp("suspended_until", { withTimezone: true }),
+  statusChangedBy: uuid("status_changed_by").references((): AnyPgColumn => users.id),
+  statusChangedAt: timestamp("status_changed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -107,10 +119,15 @@ export const posts = pgTable(
     // If the post is made on behalf of an organization (e.g. by a company/institution admin)
     organizationId: uuid("organization_id").references(() => organizations.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    // Moderation soft-hide — set by admin.hidePost, cleared by admin.restorePost.
+    // A row survives (audit trail, unhide) rather than being deleted outright.
+    hiddenAt: timestamp("hidden_at", { withTimezone: true }),
+    hiddenReason: text("hidden_reason"),
   },
   (table) => [
     index("posts_created_at_idx").on(table.createdAt),
     index("posts_org_idx").on(table.organizationId),
+    index("posts_hidden_idx").on(table.hiddenAt),
   ]
 );
 
@@ -163,11 +180,18 @@ export const postReports = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     reason: text("reason").notNull(),
+    // Triage state for the moderation console — reports start 'pending' and
+    // move to 'dismissed' or 'actioned' once an admin resolves them.
+    status: text("status").notNull().default("pending"),
+    resolvedBy: uuid("resolved_by").references(() => users.id),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolutionNote: text("resolution_note"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     unique("post_reports_unique").on(table.postId, table.reporterId),
     index("post_reports_post_idx").on(table.postId),
+    index("post_reports_status_idx").on(table.status),
   ]
 );
 
@@ -1121,5 +1145,75 @@ export const postImpressions = pgTable(
     index("post_impressions_post_idx").on(table.postId),
     index("post_impressions_viewer_idx").on(table.viewerId),
   ]
+);
+
+// ---------------------------------------------------------------------------
+// Milestone 9 — Admin & moderation: audit trail, appeals, progressive warnings
+// ---------------------------------------------------------------------------
+
+// One row per admin action, on either a user or a post (never both) — the
+// single source of truth for "who did what, when, and why" in the console.
+export const moderationActions = pgTable(
+  "moderation_actions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    adminId: uuid("admin_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    targetUserId: uuid("target_user_id").references(() => users.id, { onDelete: "cascade" }),
+    targetPostId: uuid("target_post_id").references(() => posts.id, { onDelete: "cascade" }),
+    // 'warn' | 'hide_post' | 'restore_post' | 'suspend' | 'unsuspend' | 'ban' | 'unban'
+    // | 'trust_score_adjust' | 'dismiss_report' | 'resolve_report'
+    // | 'appeal_approve' | 'appeal_reject' | 'resolve_integrity_flag'
+    actionType: text("action_type").notNull(),
+    reason: text("reason"),
+    detail: jsonb("detail").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("moderation_actions_admin_idx").on(table.adminId, table.createdAt),
+    index("moderation_actions_target_user_idx").on(table.targetUserId, table.createdAt),
+    index("moderation_actions_type_idx").on(table.actionType),
+  ]
+);
+
+// Self-service appeal against the requester's own current suspension/ban.
+export const modAppeals = pgTable(
+  "mod_appeals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull(),
+    status: text("status").notNull().default("pending"), // 'pending' | 'approved' | 'rejected'
+    reviewedBy: uuid("reviewed_by").references(() => users.id),
+    reviewerNotes: text("reviewer_notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("mod_appeals_user_idx").on(table.userId, table.createdAt),
+    index("mod_appeals_status_idx").on(table.status),
+  ]
+);
+
+// Progressive discipline short of suspension — three+ active warnings is one
+// of the admin console's escalation prompts.
+export const userWarnings = pgTable(
+  "user_warnings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull(),
+    severity: text("severity").notNull().default("low"), // 'low' | 'medium' | 'high'
+    issuedBy: uuid("issued_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("user_warnings_user_idx").on(table.userId, table.createdAt)]
 );
 

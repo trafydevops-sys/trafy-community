@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { schema } from "@trafy-community/db";
 import {
   addCommentInput,
@@ -17,6 +17,7 @@ import { router, protectedProcedure } from "../lib/trpc.js";
 import { db } from "../lib/db.js";
 import { notify } from "../lib/notify.js";
 import { scrapeOgTags } from "../lib/og-scraper.js";
+import { isAccountRestricted } from "../lib/account-status.js";
 
 async function authorName(userId: string, fallbackEmail: string): Promise<string> {
   const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, userId)).limit(1);
@@ -71,6 +72,11 @@ export const postsRouter = router({
   // Create post (text / image / link / pdf)
   // ────────────────────────────────────────────────────────
   create: protectedProcedure.input(createPostInput).mutation(async ({ ctx, input }) => {
+    const [account] = await db.select({ status: schema.users.status }).from(schema.users).where(eq(schema.users.id, ctx.user.sub)).limit(1);
+    if (account && isAccountRestricted(account.status)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Your account is currently restricted from posting. See Settings > Security for details." });
+    }
+
     const [row] = await db
       .insert(schema.posts)
       .values({
@@ -132,9 +138,11 @@ export const postsRouter = router({
           )
         : undefined;
 
-    const whereClause = cursorCreatedAt
-      ? and(scopeCondition, lt(schema.posts.createdAt, cursorCreatedAt))
-      : scopeCondition;
+    const whereClause = and(
+      isNull(schema.posts.hiddenAt), // moderation soft-hide — never surfaced in the feed
+      scopeCondition,
+      cursorCreatedAt ? lt(schema.posts.createdAt, cursorCreatedAt) : undefined
+    );
 
     const rows = await db
       .select({

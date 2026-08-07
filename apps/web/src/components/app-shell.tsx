@@ -25,6 +25,7 @@ import SearchIcon from "@mui/icons-material/Search";
 import ArrowDropDownIcon from "@mui/icons-material/ArrowDropDown";
 import ExitToAppIcon from "@mui/icons-material/ExitToApp";
 import SettingsIcon from "@mui/icons-material/Settings";
+import ShieldIcon from "@mui/icons-material/Shield";
 
 import { useAuth } from "@/lib/auth-context";
 import { withAuthRetry, trpc } from "@/lib/trpc-client";
@@ -259,6 +260,11 @@ export function AppShell({ children, active }: { children: ReactNode; active: Ta
                 <Divider />
                 <MenuItem component={Link} href="/settings" onClick={() => setProfileMenuAnchor(null)}>
                   <SettingsIcon sx={{ mr: 1.5, color: "text.secondary" }} /> Settings & Privacy
+                </MenuItem>
+                {/* Visible to everyone — /admin's own layout gates on the
+                    server-checked admin role and bounces non-admins to /feed. */}
+                <MenuItem component={Link} href="/admin" onClick={() => setProfileMenuAnchor(null)}>
+                  <ShieldIcon sx={{ mr: 1.5, color: "text.secondary" }} /> Admin console
                 </MenuItem>
                 <MenuItem onClick={() => { setProfileMenuAnchor(null); logout(); }}>
                   <ExitToAppIcon sx={{ mr: 1.5, color: "text.secondary" }} /> Sign Out

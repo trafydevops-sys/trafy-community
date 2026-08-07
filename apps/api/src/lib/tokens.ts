@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { schema } from "@trafy-community/db";
 import type { AccessTokenPayload } from "@trafy-community/core";
 import { env } from "./env.js";
@@ -105,4 +105,17 @@ export async function revokeRefreshToken(token: string): Promise<void> {
     .update(schema.refreshTokens)
     .set({ revokedAt: new Date() })
     .where(eq(schema.refreshTokens.id, id));
+}
+
+/**
+ * Revokes every live refresh token for a user — used when an admin
+ * suspends/bans an account, so access is cut off as soon as the current
+ * (short-lived) access token expires rather than surviving via silent
+ * refresh. Mirrors auth.revokeAllSessions.
+ */
+export async function revokeAllRefreshTokensFor(userId: string): Promise<void> {
+  await db
+    .update(schema.refreshTokens)
+    .set({ revokedAt: new Date() })
+    .where(and(eq(schema.refreshTokens.userId, userId), isNull(schema.refreshTokens.revokedAt)));
 }
