@@ -1,0 +1,42 @@
+# Fly.io config for the Next.js web app.
+#
+# Deploy from the REPO ROOT (same monorepo build-context reasoning as
+# Dockerfile.web's header comment):
+#   fly launch --config fly.web.toml --dockerfile Dockerfile.web --no-deploy   # first time only
+#   fly deploy --config fly.web.toml --dockerfile Dockerfile.web \
+#     --build-arg NEXT_PUBLIC_API_URL=https://api.trafy.community \
+#     --build-arg NEXT_PUBLIC_SENTRY_DSN=... \
+#     --build-arg NEXT_PUBLIC_POSTHOG_KEY=...
+#
+# NEXT_PUBLIC_* values are build args, not secrets/[env] — Next.js inlines
+# them into the client bundle at `next build` time (see Dockerfile.web's
+# comment on this). Anything genuinely secret for the web app's own server
+# side (e.g. SENTRY_AUTH_TOKEN for source-map upload) still goes through
+# `fly secrets set --config fly.web.toml SENTRY_AUTH_TOKEN=...` and gets
+# passed as a build secret, not a build arg.
+
+app = "trafy-community-web"  # placeholder — `fly launch` will prompt for a real one if this name is taken
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile.web"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [[http_service.checks]]
+    grace_period = "15s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/sign-in"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512

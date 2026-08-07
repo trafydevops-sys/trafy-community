@@ -1,0 +1,74 @@
+# Fly.io config for the API + worker. Both run from Dockerfile.api — see the
+# [processes] block below — so there's one image and one release, not two
+# deploys to keep in sync.
+#
+# Deploy from the REPO ROOT (build context must be the whole monorepo, same
+# reasoning as Dockerfile.api's own header comment):
+#   fly launch --config fly.api.toml --dockerfile Dockerfile.api --no-deploy   # first time only, creates the app
+#   fly deploy --config fly.api.toml --dockerfile Dockerfile.api
+#
+# Secrets (never put these in this file — `fly secrets set` writes them
+# encrypted, this file is committed to git):
+#   fly secrets set --config fly.api.toml \
+#     DATABASE_URL=... REDIS_URL=... JWT_ACCESS_SECRET=... JWT_REFRESH_SECRET=... \
+#     RESEND_API_KEY=... CORS_ORIGINS=https://app.trafy.com ...
+
+app = "trafy-community-api"  # placeholder — `fly launch` will prompt for a real one if this name is taken
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile.api"
+
+[env]
+  API_PORT = "4000"
+  # Fly's proxy always fronts the app, so TRUST_PROXY must be on here — this
+  # is the one deploy target where leaving it at its safe-by-default "false"
+  # would be wrong, not right. See lib/security.ts / lib/env.ts for why the
+  # default is otherwise off.
+  TRUST_PROXY = "true"
+
+# Two processes sharing one image and one release, distinguished only by
+# command — see Dockerfile.api's header comment for why there's no separate
+# Dockerfile.worker. Only "app" gets a public service below; "worker" just
+# runs, matching how apps/api/src/worker.ts has no HTTP surface of its own.
+[processes]
+  app = "npx tsx --import ./src/instrument.ts src/server.ts"
+  worker = "npx tsx --import ./src/instrument.ts src/worker.ts"
+
+# Runs once per release, before traffic shifts to the new version — this is
+# what applies packages/db's migrations. Absolute path: release_command execs
+# using the image's own WORKDIR (apps/api), which a relative
+# "packages/db/..." path wouldn't resolve from.
+[deploy]
+  release_command = "npx tsx /app/packages/db/src/migrate.ts"
+
+[http_service]
+  internal_port = 4000
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    grace_period = "15s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/health"
+
+# Socket.IO's long-lived connections + BullMQ's queue consumers both need a
+# process that stays warm — auto-stop is fine for the app (a request wakes
+# it back up), never appropriate for the worker, which has no request to
+# wake it and would just silently stop processing queued jobs.
+[[vm]]
+  processes = ["app"]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512
+
+[[vm]]
+  processes = ["worker"]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512

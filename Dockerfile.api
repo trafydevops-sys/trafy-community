@@ -1,0 +1,72 @@
+# syntax=docker/dockerfile:1.7
+#
+# Builds the trafy-community API image — also used for the BullMQ worker
+# process (`start:worker` instead of `start`; see fly.api.toml's
+# [processes] and docker-compose.prod.yml's `worker` service, both of which
+# run this same image with a different command instead of maintaining a
+# second Dockerfile).
+#
+# Build from the REPO ROOT (this is a monorepo — apps/api depends on
+# workspace packages, so the build context has to be the whole repo, not
+# apps/api alone):
+#   docker build -f Dockerfile.api -t trafy-api .
+#
+# Runs via tsx, not `node dist/*.js` — @trafy-community/core and /db are
+# consumed as raw TypeScript (package.json "main" points at src/index.ts,
+# the same way apps/web's webpack build and apps/mobile's Metro bundler
+# already consume them). Plain `node` cannot load a .ts file and throws
+# ERR_UNKNOWN_FILE_EXTENSION; tsx is the runtime already proven to handle
+# this everywhere else in the project (dev and worker have always used it).
+# See the "// start" comment in apps/api/package.json for the same note.
+
+FROM node:22-alpine AS deps
+WORKDIR /app
+# Only manifests in this layer, so `npm ci` — the slow step — gets cached
+# across builds where only application code changed, not dependencies.
+# npm workspaces' `npm ci` validates the lockfile against every workspace
+# listed in the root package.json, so all of them must be present even
+# though this image only ever runs apps/api.
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY apps/mobile/package.json apps/mobile/package.json
+COPY packages/core/package.json packages/core/package.json
+COPY packages/db/package.json packages/db/package.json
+RUN npm ci
+
+FROM node:22-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+# tini-style init: tsx spawns Node as a child process, and without a real PID
+# 1 that reaps zombies and forwards signals, `docker stop` / a Fly deploy's
+# SIGTERM would not reach the app the way server.ts's shutdown handler (see
+# apps/api/src/server.ts) expects — the graceful-shutdown work would go to
+# waste under a plain `CMD ["npx", "tsx", ...]`.
+RUN apk add --no-cache dumb-init
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json package-lock.json ./
+COPY apps/api ./apps/api
+COPY packages/core ./packages/core
+COPY packages/db ./packages/db
+
+# Local-disk upload fallback (see lib/storage.ts) needs somewhere to write
+# when S3_ENDPOINT isn't set. Ephemeral in this image by design — the whole
+# point of that fallback being labeled "won't survive a restart" in the
+# platform audit; set S3_ENDPOINT for anything that needs to persist.
+RUN mkdir -p apps/api/uploads
+
+# Runs as the image's own non-root user rather than root — Fastify/tsx don't
+# need root, and this is a two-line hardening step with no downside.
+RUN addgroup -S trafy && adduser -S trafy -G trafy \
+    && chown -R trafy:trafy apps/api/uploads
+USER trafy
+
+WORKDIR /app/apps/api
+EXPOSE 4000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD node -e "fetch('http://localhost:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["npx", "tsx", "--import", "./src/instrument.ts", "src/server.ts"]

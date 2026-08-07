@@ -1,0 +1,94 @@
+# syntax=docker/dockerfile:1.7
+#
+# Builds the trafy-community web app image using Next.js "standalone" output
+# (see the `output: "standalone"` line in apps/web/next.config.ts).
+#
+# Build from the REPO ROOT — same monorepo-context reasoning as
+# Dockerfile.api:
+#   docker build -f Dockerfile.web -t trafy-web \
+#     --build-arg NEXT_PUBLIC_API_URL=https://api.example.com .
+#
+# Unlike the API image, this one needs no runtime dependency on
+# @trafy-community/core's raw-TS "main" field at all: webpack bundles and
+# transpiles everything ahead of time into a single self-contained
+# server.js, so the final image doesn't even need node_modules installed —
+# `output: standalone` traces only the handful of packages actually used
+# at runtime (next itself, mostly) into .next/standalone. apps/api's source
+# is still needed at *build* time though, purely for a type-only import —
+# see the COPY apps/api line in the build stage below.
+
+FROM node:22-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY apps/mobile/package.json apps/mobile/package.json
+COPY packages/core/package.json packages/core/package.json
+COPY packages/db/package.json packages/db/package.json
+RUN npm ci
+
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY apps/web ./apps/web
+# apps/web imports tRPC's AppRouter as a *type only* straight from apps/api's
+# source (apps/web/src/lib/trpc-client.ts: `from "../../../api/src/routers/index"`)
+# rather than through a published package — a type-only import, so it costs
+# nothing at runtime, but `next build`'s typecheck step still needs the files
+# on disk to resolve it, exactly like `npm run typecheck` at the repo root
+# already relies on apps/api being a sibling on disk, not an npm dependency.
+COPY apps/api ./apps/api
+COPY packages/core ./packages/core
+COPY packages/db ./packages/db
+
+# Next.js inlines every NEXT_PUBLIC_* variable into the client bundle at
+# build time, not at container start — unlike the API's env vars, these
+# cannot be supplied only at `docker run`/deploy time. A build without them
+# silently ships a client pointed at nothing, so they're required build args
+# instead of falling back to next.config.ts's own localhost defaults, which
+# are meant for `next dev` only.
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_SENTRY_DSN
+ARG NEXT_PUBLIC_POSTHOG_KEY
+ARG NEXT_PUBLIC_POSTHOG_HOST
+ARG SENTRY_AUTH_TOKEN
+ARG SENTRY_ORG
+ARG SENTRY_PROJECT
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
+    NEXT_PUBLIC_SENTRY_DSN=${NEXT_PUBLIC_SENTRY_DSN} \
+    NEXT_PUBLIC_POSTHOG_KEY=${NEXT_PUBLIC_POSTHOG_KEY} \
+    NEXT_PUBLIC_POSTHOG_HOST=${NEXT_PUBLIC_POSTHOG_HOST} \
+    SENTRY_AUTH_TOKEN=${SENTRY_AUTH_TOKEN} \
+    SENTRY_ORG=${SENTRY_ORG} \
+    SENTRY_PROJECT=${SENTRY_PROJECT} \
+    NEXT_TELEMETRY_DISABLED=1
+
+WORKDIR /app/apps/web
+RUN npm run build
+
+FROM node:22-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0
+RUN apk add --no-cache dumb-init
+
+# Standalone output mirrors the monorepo path structure (outputFileTracingRoot
+# in next.config.ts is set to the repo root) — server.js lands at
+# apps/web/server.js relative to what gets copied here, not at the top level.
+COPY --from=build /app/apps/web/.next/standalone/. ./
+# Static assets and public/ are deliberately excluded from standalone output
+# by Next.js itself (its docs call this out) — copied separately or the app
+# 404s on every CSS/JS chunk and image.
+COPY --from=build /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=build /app/apps/web/public ./apps/web/public
+
+RUN addgroup -S trafy && adduser -S trafy -G trafy && chown -R trafy:trafy /app
+USER trafy
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD node -e "fetch('http://localhost:3000/sign-in').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
+
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["node", "apps/web/server.js"]

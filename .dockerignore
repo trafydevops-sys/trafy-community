@@ -1,0 +1,44 @@
+# Keep this in sync with .gitignore's intent, plus Docker-specific excludes.
+# COPY steps in Dockerfile.api / Dockerfile.web pull in whole directories
+# (apps/api, packages/core, ...) — this file is what keeps build context and
+# stale local artifacts (dist/, someone's node_modules) out of the image.
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+build/
+.next/
+**/.next/
+.turbo/
+.expo/
+**/.expo/
+*.tsbuildinfo
+
+.git/
+.github/
+
+.env
+.env.local
+.env.*.local
+
+apps/api/uploads/*
+!apps/api/uploads/.gitkeep
+
+.superpowers/
+docs/
+graphify-out/
+architecture_diagrams/
+*.log
+.DS_Store
+
+# Test files never run inside the image.
+**/test/
+**/*.test.ts
+
+# Mobile is deployed via EAS, not Docker — never needed in either image, but
+# its package.json IS still copied explicitly (see the Dockerfiles) since
+# `npm ci` at the repo root validates the lockfile against every workspace.
+apps/mobile/app/
+apps/mobile/assets/
+apps/mobile/ios/
+apps/mobile/android/

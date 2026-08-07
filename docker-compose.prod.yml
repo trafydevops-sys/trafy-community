@@ -1,0 +1,75 @@
+# Runs the actual production images end-to-end on a single host — this is
+# what proved Dockerfile.api / Dockerfile.web work before either was ever
+# pushed anywhere; it's also a legitimate small-deployment target on its own
+# (a single VM with Docker), not only a pre-flight check for Fly.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build
+#
+# Layered on top of docker-compose.yml (which owns postgres/redis) rather
+# than duplicating those services here.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    command: ["npx", "tsx", "--import", "./src/instrument.ts", "src/server.ts"]
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      DATABASE_URL: postgresql://trafy:trafy@postgres:5432/trafy_community
+      REDIS_URL: redis://redis:6379
+      # Dev-only placeholders — a real deploy supplies these via the
+      # platform's secret store, never baked into the image or this file.
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-change-me-in-a-real-deploy-16chars}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-in-a-real-deploy-16chars}
+      API_URL: http://localhost:4000
+      WEB_URL: http://localhost:3000
+      CORS_ORIGINS: http://localhost:3000
+      TRUST_PROXY: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      # Named volume, not a bind mount: matches how a real single-host deploy
+      # would keep uploads alive across `docker compose up --build`, while
+      # still being explicit that this is the "storage won't survive a
+      # multi-instance deploy" fallback from the platform audit, not a
+      # substitute for S3 in a real multi-instance deployment.
+      - trafy_community_uploads:/app/apps/api/uploads
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    command: ["npx", "tsx", "--import", "./src/instrument.ts", "src/worker.ts"]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://trafy:trafy@postgres:5432/trafy_community
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-change-me-in-a-real-deploy-16chars}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-in-a-real-deploy-16chars}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - trafy_community_uploads:/app/apps/api/uploads
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  trafy_community_uploads:

@@ -191,6 +191,66 @@ packages/
   db/      Drizzle schema, client, migrations
 ```
 
+## Deployment
+
+Two production images, one per app — `Dockerfile.api` (also runs the BullMQ
+worker; see its header comment) and `Dockerfile.web` (Next.js `standalone`
+output). Both build from the **repo root** as context, since this is a
+monorepo and apps/api/apps/web both depend on workspace packages:
+
+```bash
+docker build -f Dockerfile.api -t trafy-api .
+docker build -f Dockerfile.web -t trafy-web --build-arg NEXT_PUBLIC_API_URL=https://api.example.com .
+```
+
+`apps/api`'s image runs the app via `tsx`, not a `tsc`-compiled artifact —
+`@trafy-community/core`/`db` are consumed as raw TypeScript everywhere in
+this project (web's webpack build, mobile's Metro bundler, and api's own dev
+script all already work this way), and plain `node dist/server.js` cannot
+load a `.ts` file. `apps/web`'s image needs none of that: webpack bundles and
+transpiles everything ahead of build time, so `output: standalone` produces
+a fully self-contained `server.js`.
+
+**Try the real images locally** before deploying anywhere:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build
+```
+
+This runs `api`, `worker`, and `web` from the actual production images
+against the same postgres/redis `docker-compose.yml` already used for local
+dev — the closest thing to a full staging environment without a cloud
+account.
+
+**Deploying to Fly.io** — `fly.api.toml` (API + worker, as two Fly
+"processes" sharing one image and one release) and `fly.web.toml` are both
+checked in with deploy commands in their header comments. First-time setup:
+
+```bash
+fly launch --config fly.api.toml --dockerfile Dockerfile.api --no-deploy
+fly secrets set --config fly.api.toml DATABASE_URL=... REDIS_URL=... JWT_ACCESS_SECRET=... JWT_REFRESH_SECRET=... RESEND_API_KEY=... CORS_ORIGINS=https://app.example.com
+fly launch --config fly.web.toml --dockerfile Dockerfile.web --no-deploy
+```
+
+**CI/CD** (`.github/workflows/ci.yml`): every push to `main` that passes
+`build` also publishes both images to GHCR (`publish-images`, portable
+beyond Fly) and deploys straight to Fly (`deploy`, via `flyctl deploy
+--remote-only` — it builds from the Dockerfile itself, not the GHCR image,
+so a GHCR outage can't block a real deploy). `fly.api.toml`'s
+`release_command` runs `packages/db`'s migrations before traffic shifts to
+the new release. Needs repo secret `FLY_API_TOKEN`; the web build also reads
+`NEXT_PUBLIC_API_URL`/`NEXT_PUBLIC_POSTHOG_HOST`/`SENTRY_ORG`/`SENTRY_PROJECT`
+from repo **variables** and `NEXT_PUBLIC_POSTHOG_KEY`/`NEXT_PUBLIC_SENTRY_DSN`/
+`SENTRY_AUTH_TOKEN` from repo **secrets** (see `Settings → Secrets and
+variables → Actions`).
+
+Still open — the two remaining items from the [production-readiness
+audit](#known-simplifications): the OTP dev-code response needs an explicit
+`NODE_ENV`/environment guard so a misconfigured deploy (no `RESEND_API_KEY`)
+can't let anyone sign in as any email, and there's no autoscaling/multi-region
+config yet — `fly.api.toml`'s `min_machines_running = 1` keeps one instance
+warm, nothing more.
+
 ## Known simplifications (Milestone 1 scope — revisit before shipping)
 
 - **Token storage**: the web client keeps the access + refresh token pair in
