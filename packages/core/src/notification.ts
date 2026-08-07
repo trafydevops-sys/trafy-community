@@ -14,6 +14,13 @@ export const notificationTypeSchema = z.enum([
   "org_invite",
   "connection_request",
   "connection_accepted",
+  "user_warned",
+  "user_suspended",
+  "user_banned",
+  "user_unsuspended",
+  "appeal_approved",
+  "appeal_rejected",
+  "report_resolved",
 ]);
 export type NotificationType = z.infer<typeof notificationTypeSchema>;
 

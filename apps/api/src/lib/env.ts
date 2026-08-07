@@ -38,6 +38,17 @@ const envSchema = z.object({
   API_PORT: z.coerce.number().default(4000),
   API_URL: z.string().default("http://localhost:4000"),
   WEB_URL: z.string().default("http://localhost:3000"),
+  // Comma-separated browser origins allowed to call this API. Unset falls
+  // back to WEB_URL alone — see lib/security.ts.
+  CORS_ORIGINS: z.string().optional(),
+  // Behind a load balancer (Fly, Render, ALB, nginx) the socket peer is the
+  // proxy, so every caller shares one req.ip and the rate limiter below would
+  // throttle all users as if they were one. Turn this on only when a trusted
+  // proxy really is in front — it makes the API believe X-Forwarded-For,
+  // which a direct-to-internet deploy would let anyone forge.
+  TRUST_PROXY: z.coerce.boolean().default(false),
+  RATE_LIMIT_MAX: z.coerce.number().default(300),
+  RATE_LIMIT_WINDOW: z.string().default("1 minute"),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   LINKEDIN_CLIENT_ID: z.string().optional(),
@@ -72,3 +83,4 @@ export const usingCodeGradingStub = !env.JUDGE0_URL;
 export const liveKitConfigured = Boolean(env.LIVEKIT_URL && env.LIVEKIT_API_KEY && env.LIVEKIT_API_SECRET);
 export const usingSentry = Boolean(env.SENTRY_DSN);
 export const usingPostHog = Boolean(env.POSTHOG_API_KEY);
+export const usingDefaultCorsOrigins = !env.CORS_ORIGINS;

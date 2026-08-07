@@ -3,12 +3,20 @@ import { Server, type Socket } from "socket.io";
 import type { SocketMessageEvent, SocketTypingEvent } from "@trafy-community/core";
 import type { Notification } from "@trafy-community/core";
 import { verifyAccessToken } from "./tokens.js";
+import { corsRejection, isOriginAllowed } from "./security.js";
 
 let io: Server | undefined;
 
-export function initRealtime(httpServer: HttpServer): Server {
+/** `allowedOrigins` comes from the same parseAllowedOrigins() the HTTP server
+ *  uses, so the socket gateway can't end up more permissive than the API. */
+export function initRealtime(httpServer: HttpServer, allowedOrigins: string[]): Server {
   io = new Server(httpServer, {
-    cors: { origin: true },
+    cors: {
+      origin: (origin, cb) => {
+        if (isOriginAllowed(origin, allowedOrigins)) return cb(null, true);
+        cb(corsRejection(origin));
+      },
+    },
     path: "/socket.io",
   });
 

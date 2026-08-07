@@ -8,6 +8,12 @@ const posthogAssetHost = posthogHost.replace(/^https:\/\/(us|eu)\./, "https://$1
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // Traces the minimal node_modules subset + a self-contained server.js into
+  // .next/standalone at build time — the Docker image runs off that alone,
+  // with no node_modules install step and no runtime dependency on
+  // @trafy-community/core's raw-TS main field (everything is bundled by
+  // webpack ahead of time, unlike apps/api — see its "// start" script note).
+  output: "standalone",
   transpilePackages: ["@trafy-community/core"],
   // Pin the workspace root to this repo — without it Next.js walks up and
   // finds the sibling trafy/package-lock.json and gets confused about which
